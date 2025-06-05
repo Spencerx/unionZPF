@@ -115,6 +115,7 @@ _: {
           # lightclients = pkgs.lib.lists.remove "cometbls" (builtins.attrNames all-lightclients);
           lightclients = [
             "sui"
+            "trusted-mpt"
           ];
         }
         {
@@ -492,7 +493,7 @@ _: {
           text = ''
             embed-commit-verifier extract <(curl -L \
               --silent \
-              '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/Code"&data=0x'"$(
+              '${rpc_url}/abci_query?path=%22/cosmwasm.wasm.v1.Query/Code%22&data=0x'"$(
                 buf \
                   convert \
                   ${cosmwasmProtoDefs}/cosmwasm.proto \
@@ -501,7 +502,7 @@ _: {
                     echo "{\"code_id\":$(
                       curl -L \
                         --silent \
-                        '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/ContractInfo"&data=0x'"$(
+                        '${rpc_url}/abci_query?path=%22/cosmwasm.wasm.v1.Query/ContractInfo%22&data=0x'"$(
                           buf \
                             convert \
                             ${cosmwasmProtoDefs}/cosmwasm.proto \
@@ -979,7 +980,7 @@ _: {
               MINTER_ADDRESS="$(
                 curl -L \
                   --silent \
-                  '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/SmartContractState"&data=0x'"$(
+                  '${rpc_url}/abci_query?path=%22/cosmwasm.wasm.v1.Query/SmartContractState%22&data=0x'"$(
                     buf \
                       convert \
                       ${cosmwasmProtoDefs}/cosmwasm.proto \

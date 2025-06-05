@@ -279,17 +279,20 @@ abstract contract UnionScript is UnionBase {
                         address(
                             new UCS03Zkgm(
                                 handler,
-                                params.weth,
-                                zkgmERC20,
-                                params.rateLimitEnabled,
                                 new UCS03ZkgmSendImpl(
                                     handler,
                                     params.weth,
+                                    zkgmERC20,
                                     params.nativeTokenName,
                                     params.nativeTokenSymbol,
                                     params.nativeTokenDecimals
                                 ),
-                                new UCS03ZkgmStakeImpl(handler)
+                                new UCS03ZkgmStakeImpl(handler),
+                                new UCS03ZkgmFungibleAssetOrderImpl(
+                                    params.weth,
+                                    zkgmERC20,
+                                    params.rateLimitEnabled
+                                )
                             )
                         ),
                         abi.encodeCall(UCS03Zkgm.initialize, (address(manager)))
@@ -1142,13 +1145,14 @@ contract GetDeployed is VersionedScript {
         string memory implUCS03Send = "implUCS03Send";
         implUCS03Send.serialize(
             "contract",
-            string("contracts/apps/ucs/03-zkgm/Zkgm.sol:UCS03ZkgmSendImpl")
+            string("contracts/apps/ucs/03-zkgm/Send.sol:UCS03ZkgmSendImpl")
         );
         implUCS03Send = implUCS03Send.serialize(
             "args",
             abi.encode(
                 handler,
                 weth,
+                zkgmERC20,
                 nativeTokenName,
                 nativeTokenSymbol,
                 nativeTokenDecimals
@@ -1161,11 +1165,25 @@ contract GetDeployed is VersionedScript {
         string memory implUCS03Stake = "implUCS03Stake";
         implUCS03Stake.serialize(
             "contract",
-            string("contracts/apps/ucs/03-zkgm/Zkgm.sol:UCS03ZkgmStakeImpl")
+            string("contracts/apps/ucs/03-zkgm/Stake.sol:UCS03ZkgmStakeImpl")
         );
         implUCS03Stake = implUCS03Stake.serialize("args", abi.encode(handler));
         impls.serialize(
             UCS03Zkgm(payable(ucs03)).STAKE_IMPL().toHexString(), implUCS03Stake
+        );
+
+        string memory implUCS03FAO = "implUCS03FAO";
+        implUCS03FAO.serialize(
+            "contract",
+            string(
+                "contracts/apps/ucs/03-zkgm/FungibleAssetOrder.sol:UCS03ZkgmFungibleAssetOrderImpl"
+            )
+        );
+        implUCS03FAO = implUCS03FAO.serialize(
+            "args", abi.encode(weth, zkgmERC20, rateLimitEnabled)
+        );
+        impls.serialize(
+            UCS03Zkgm(payable(ucs03)).FAO_IMPL().toHexString(), implUCS03FAO
         );
 
         string memory implUCS03 = "implUCS03";
@@ -1176,11 +1194,9 @@ contract GetDeployed is VersionedScript {
             "args",
             abi.encode(
                 handler,
-                weth,
-                zkgmERC20,
-                rateLimitEnabled,
                 UCS03Zkgm(payable(ucs03)).SEND_IMPL(),
-                UCS03Zkgm(payable(ucs03)).STAKE_IMPL()
+                UCS03Zkgm(payable(ucs03)).STAKE_IMPL(),
+                UCS03Zkgm(payable(ucs03)).FAO_IMPL()
             )
         );
         impls = impls.serialize(implOf(ucs03).toHexString(), implUCS03);
@@ -1230,17 +1246,18 @@ contract DryUpgradeUCS03 is VersionedScript {
         address newImplementation = address(
             new UCS03Zkgm(
                 handler,
-                weth,
-                zkgmERC20,
-                rateLimitEnabled,
                 new UCS03ZkgmSendImpl(
                     handler,
                     weth,
+                    zkgmERC20,
                     nativeTokenName,
                     nativeTokenSymbol,
                     nativeTokenDecimals
                 ),
-                new UCS03ZkgmStakeImpl(handler)
+                new UCS03ZkgmStakeImpl(handler),
+                new UCS03ZkgmFungibleAssetOrderImpl(
+                    weth, zkgmERC20, rateLimitEnabled
+                )
             )
         );
 
@@ -1291,17 +1308,18 @@ contract UpgradeUCS03 is VersionedScript {
         address newImplementation = address(
             new UCS03Zkgm(
                 handler,
-                weth,
-                zkgmERC20,
-                rateLimitEnabled,
                 new UCS03ZkgmSendImpl(
                     handler,
                     weth,
+                    zkgmERC20,
                     nativeTokenName,
                     nativeTokenSymbol,
                     nativeTokenDecimals
                 ),
-                new UCS03ZkgmStakeImpl(handler)
+                new UCS03ZkgmStakeImpl(handler),
+                new UCS03ZkgmFungibleAssetOrderImpl(
+                    weth, zkgmERC20, rateLimitEnabled
+                )
             )
         );
         ucs03.upgradeToAndCall(newImplementation, new bytes(0));
@@ -1541,20 +1559,11 @@ contract UpgradeStateLensIcs23Ics23Client is VersionedScript {
     address immutable deployer;
     address immutable sender;
     uint256 immutable privateKey;
-    uint32[] public clientIds;
 
     constructor() {
         deployer = vm.envAddress("DEPLOYER");
         sender = vm.envAddress("SENDER");
         privateKey = vm.envUint("PRIVATE_KEY");
-
-        // uint256[] memory u256ClientIds = vm.envUint("CLIENT_IDS", ",");
-
-        // clientIds = new uint32[](u256ClientIds.length);
-
-        // for (uint256 i = 0; i < u256ClientIds.length; ++i) {
-        //     clientIds[i] = uint32(u256ClientIds[i]);
-        // }
     }
 
     function getDeployed(
@@ -1587,10 +1596,6 @@ contract UpgradeStateLensIcs23Ics23Client is VersionedScript {
         stateLensIcs23Ics23Client.upgradeToAndCall(
             newImplementation, new bytes(0)
         );
-        // abi.encodeWithSelector(
-        //     StateLensIcs23Ics23Client.migrateClientStateToV1.selector,
-        //     clientIds
-        // )
 
         vm.stopBroadcast();
     }
