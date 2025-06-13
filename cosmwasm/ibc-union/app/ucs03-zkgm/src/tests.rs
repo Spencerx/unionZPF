@@ -11,20 +11,26 @@ use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, SudoMs
 use cw_storage_plus::Map;
 use ibc_union_msg::module::IbcUnionMsg;
 use ibc_union_spec::{path::commit_packets, ChannelId, ConnectionId, Packet};
-use unionlabs::primitives::{Bytes, H256};
+use unionlabs::{
+    ethereum::keccak256,
+    primitives::{Bytes, H256},
+};
 
 use crate::{
     com::{
-        Ack, Batch, Forward, FungibleAssetOrder, FungibleAssetOrderAck, Instruction, Multiplex,
-        ZkgmPacket, FILL_TYPE_PROTOCOL, FORWARD_SALT_MAGIC, INSTR_VERSION_0, INSTR_VERSION_1,
+        Ack, Batch, Forward, FungibleAssetMetadata, FungibleAssetOrder, FungibleAssetOrderAck,
+        FungibleAssetOrderV2, Instruction, Multiplex, ZkgmPacket, FILL_TYPE_MARKETMAKER,
+        FILL_TYPE_PROTOCOL, FORWARD_SALT_MAGIC, FUNGIBLE_ASSET_METADATA_IMAGE_PREDICT_V1,
+        FUNGIBLE_ASSET_METADATA_TYPE_IMAGE, FUNGIBLE_ASSET_METADATA_TYPE_IMAGE_UNWRAP,
+        FUNGIBLE_ASSET_METADATA_TYPE_PREIMAGE, INSTR_VERSION_0, INSTR_VERSION_1, INSTR_VERSION_2,
         OP_BATCH, OP_FORWARD, OP_FUNGIBLE_ASSET_ORDER, OP_MULTIPLEX, TAG_ACK_FAILURE,
         TAG_ACK_SUCCESS,
     },
     contract::{
-        dequeue_channel_from_path, execute, increase_channel_balance, instantiate,
-        is_forwarded_packet, migrate, pop_channel_from_path, query, reply, reverse_channel_path,
-        tint_forward_salt, update_channel_path, verify_batch, verify_forward, verify_internal,
-        verify_multiplex, PROTOCOL_VERSION,
+        dequeue_channel_from_path, execute, increase_channel_balance, increase_channel_balance_v2,
+        instantiate, is_forwarded_packet, migrate, pop_channel_from_path, query, reply,
+        reverse_channel_path, tint_forward_salt, update_channel_path, verify_batch, verify_forward,
+        verify_internal, verify_multiplex, PROTOCOL_VERSION,
     },
     msg::{
         Config, ExecuteMsg, InitMsg, PredictWrappedTokenResponse, QueryMsg, TokenMinterInitParams,
@@ -906,11 +912,11 @@ struct TestState {
 }
 
 impl TestState {
-    fn balance_of(&self, token: &Bytes, address: Addr) -> u128 {
+    fn balance_of(&self, token: impl Into<String>, address: Addr) -> u128 {
         self.app
             .wrap()
             .query_wasm_smart::<cw20::BalanceResponse>(
-                std::str::from_utf8(token).unwrap(),
+                token,
                 &cw20_base::msg::QueryMsg::Balance {
                     address: address.to_string(),
                 },
@@ -961,7 +967,7 @@ fn init_test_state(admin: Addr) -> TestState {
                 rate_limit_admin: Addr::unchecked("hola"),
                 rate_limit_operators: vec![rate_limiter.clone()],
                 rate_limit_disabled: false,
-                dummy_code_id: 0,
+                dummy_code_id: proxy_code_id,
                 cw_account_code_id: 0,
             },
             minter_init_params: TokenMinterInitParams::Cw20 {
@@ -1058,7 +1064,7 @@ struct IncomingOrderBuilder {
 
 #[allow(dead_code)]
 impl IncomingOrderBuilder {
-    fn new(quote_token: Bytes) -> Self {
+    fn new(quote_token: String) -> Self {
         // host
         let caller = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
         let relayer = Addr::unchecked("union1ml67yhc5kp8qrxssfnqz8pxqvjyln5fus654vk");
@@ -1090,7 +1096,7 @@ impl IncomingOrderBuilder {
             base_token_decimals,
             base_token_path,
             base_amount,
-            quote_token,
+            quote_token: quote_token.as_bytes().to_vec().into(),
             quote_amount,
             sender,
             receiver,
@@ -1208,10 +1214,13 @@ fn test_recv_packet_native_new_wrapped() {
             },
         )
         .unwrap()
-        .wrapped_token;
-    let quote_token_addr = Addr::unchecked(std::str::from_utf8(&quote_token).unwrap());
+        .wrapped_token
+        .parse::<Bytes>()
+        .map(|bz| String::from_utf8(bz.into()).unwrap())
+        .unwrap();
+    let quote_token_addr = Addr::unchecked(quote_token);
     assert!(st.app.contract_data(&quote_token_addr).is_err());
-    let (order, msg, packet) = IncomingOrderBuilder::new(quote_token)
+    let (order, msg, packet) = IncomingOrderBuilder::new(quote_token_addr.clone().into())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1292,10 +1301,13 @@ fn test_recv_packet_native_new_wrapped_relative_supply() {
             },
         )
         .unwrap()
-        .wrapped_token;
-    let quote_token_addr = Addr::unchecked(std::str::from_utf8(&quote_token).unwrap());
+        .wrapped_token
+        .parse::<Bytes>()
+        .map(|bz| String::from_utf8(bz.into()).unwrap())
+        .unwrap();
+    let quote_token_addr = Addr::unchecked(quote_token);
     assert!(st.app.contract_data(&quote_token_addr).is_err());
-    let (order, msg, _) = IncomingOrderBuilder::new(quote_token.clone())
+    let (order, msg, _) = IncomingOrderBuilder::new(quote_token_addr.clone().into())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1324,7 +1336,7 @@ fn test_recv_packet_native_new_wrapped_relative_supply() {
         )
         .unwrap();
     assert_eq!(
-        st.balance_of(&quote_token, order.receiver),
+        st.balance_of(&quote_token_addr, order.receiver),
         order.quote_amount
     );
 }
@@ -1350,7 +1362,10 @@ fn test_recv_packet_native_new_wrapped_split_fee() {
             },
         )
         .unwrap()
-        .wrapped_token;
+        .wrapped_token
+        .parse::<Bytes>()
+        .map(|bz| String::from_utf8(bz.into()).unwrap())
+        .unwrap();
     let (order, msg, _) = IncomingOrderBuilder::new(quote_token.clone())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
@@ -1414,7 +1429,10 @@ fn test_recv_packet_native_new_wrapped_origin_set() {
             },
         )
         .unwrap()
-        .wrapped_token;
+        .wrapped_token
+        .parse::<Bytes>()
+        .map(|bz| String::from_utf8(bz.into()).unwrap())
+        .unwrap();
     let (order, msg, _) = IncomingOrderBuilder::new(quote_token.clone())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
@@ -1443,7 +1461,7 @@ fn test_recv_packet_native_new_wrapped_origin_set() {
             wasm_execute(st.zkgm.clone(), &msg, vec![]).unwrap().into(),
         )
         .unwrap();
-    let quote_token_addr = Addr::unchecked(std::str::from_utf8(&quote_token).unwrap());
+    let quote_token_addr = Addr::unchecked(quote_token);
     let token_origin = TOKEN_ORIGIN
         .load(
             st.app.contract_storage(&st.zkgm).as_ref(),
@@ -1475,10 +1493,13 @@ fn test_recv_packet_native_base_dont_cover_quote_only_maker() {
             },
         )
         .unwrap()
-        .wrapped_token;
-    let quote_token_addr = Addr::unchecked(std::str::from_utf8(&quote_token).unwrap());
+        .wrapped_token
+        .parse::<Bytes>()
+        .map(|bz| String::from_utf8(bz.into()).unwrap())
+        .unwrap();
+    let quote_token_addr = Addr::unchecked(quote_token);
     assert!(st.app.contract_data(&quote_token_addr).is_err());
-    let (_, msg, _) = IncomingOrderBuilder::new(quote_token)
+    let (_, msg, _) = IncomingOrderBuilder::new(quote_token_addr.clone().into())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1507,10 +1528,9 @@ fn test_recv_packet_native_to_native_only_maker() {
     let path = U256::ZERO;
     let destination_channel_id = ChannelId!(10);
     let base_token = Bytes::from(hex_literal::hex!("DEAFBABE"));
-    let quote_token = Bytes::from(b"muno");
-    let quote_token_addr = Addr::unchecked(std::str::from_utf8(&quote_token).unwrap());
+    let quote_token_addr = Addr::unchecked("muno");
     assert!(st.app.contract_data(&quote_token_addr).is_err());
-    let (_, msg, _) = IncomingOrderBuilder::new(quote_token)
+    let (_, msg, _) = IncomingOrderBuilder::new(quote_token_addr.into())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1536,10 +1556,9 @@ fn test_recv_packet_native_quote_maker_fill_ok() {
     let path = U256::ZERO;
     let destination_channel_id = ChannelId!(10);
     let base_token = Bytes::from(hex_literal::hex!("DEAFBABE"));
-    let quote_token = Bytes::from(b"muno");
-    let quote_token_addr = Addr::unchecked(std::str::from_utf8(&quote_token).unwrap());
+    let quote_token_addr = Addr::unchecked("muno");
     assert!(st.app.contract_data(&quote_token_addr).is_err());
-    let (order, msg, _) = IncomingOrderBuilder::new(quote_token)
+    let (order, msg, _) = IncomingOrderBuilder::new(quote_token_addr.clone().into())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1630,7 +1649,7 @@ fn test_recv_packet_native_unwrap_wrapped_token_ok() {
         )
         .unwrap();
 
-    let (order, msg, packet) = IncomingOrderBuilder::new(wrapped_token.as_bytes().into())
+    let (order, msg, packet) = IncomingOrderBuilder::new(wrapped_token.to_string())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1665,16 +1684,10 @@ fn test_recv_packet_native_unwrap_wrapped_token_ok() {
     );
 
     // balance is reduced to 1000
-    assert_eq!(
-        st.balance_of(&wrapped_token.as_bytes().into(), st.minter.clone()),
-        1000
-    );
+    assert_eq!(st.balance_of(&wrapped_token, st.minter.clone()), 1000);
 
     // receiver's balance is now 0xCAFEBABE
-    assert_eq!(
-        st.balance_of(&wrapped_token.as_bytes().into(), order.receiver),
-        0xCAFEBABE
-    );
+    assert_eq!(st.balance_of(&wrapped_token, order.receiver), 0xCAFEBABE);
 
     let channel_balance = CHANNEL_BALANCE
         .load(
@@ -1739,7 +1752,7 @@ fn test_recv_packet_native_unwrap_native_token_ok() {
         )
         .unwrap();
 
-    let (order, msg, packet) = IncomingOrderBuilder::new(wrapped_token.as_bytes().into())
+    let (order, msg, packet) = IncomingOrderBuilder::new(wrapped_token.to_string())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1837,7 +1850,7 @@ fn test_recv_packet_native_unwrap_channel_no_outstanding() {
     )
     .unwrap();
 
-    let (_, msg, packet) = IncomingOrderBuilder::new(wrapped_token.as_bytes().into())
+    let (_, msg, packet) = IncomingOrderBuilder::new(wrapped_token.to_string())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1918,7 +1931,7 @@ fn test_recv_packet_native_unwrap_path_no_outstanding() {
     )
     .unwrap();
 
-    let (_, msg, packet) = IncomingOrderBuilder::new(wrapped_token.as_bytes().into())
+    let (_, msg, packet) = IncomingOrderBuilder::new(wrapped_token.to_string())
         .with_base_token(base_token)
         .with_destination_channel_id(destination_channel_id)
         .with_path(path)
@@ -1958,6 +1971,1239 @@ fn test_recv_packet_native_unwrap_path_no_outstanding() {
         .unwrap();
     // no transfer is made
     assert_eq!(balance.balance.u128(), 0xCAFEBABEu128 + 1000);
+}
+
+#[test]
+fn test_recv_packet_native_v2_unwrap_base_amount_less_than_quote_amount_failure_ack() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ONE;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let base_amount = 100u128;
+    let quote_amount = 200u128; // quote_amount > base_amount
+
+    let wrapped_token = st
+        .app
+        .instantiate_contract(
+            st.cw20_base_code_id,
+            admin.clone(),
+            &cw20_base::msg::InstantiateMsg {
+                name: "muno".to_string(),
+                symbol: "muno".to_string(),
+                decimals: 8,
+                initial_balances: vec![Cw20Coin {
+                    address: st.minter.to_string(),
+                    amount: (base_amount + 1000).into(),
+                }],
+                mint: None,
+                marketing: None,
+            },
+            &[],
+            "muno-token",
+            Some(admin.clone().to_string()),
+        )
+        .unwrap();
+
+    // Create a V2 order with baseAmount < quoteAmount for unwrap operation
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: base_amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_IMAGE_UNWRAP,
+                    metadata: vec![0u8; 32].into(), // dummy metadata image
+                    quote_token: wrapped_token.as_bytes().to_vec().into(),
+                    quote_amount: quote_amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    // For market maker fill, provide the quote token as funds
+    let quote_coin = cosmwasm_std::Coin::new(quote_amount, wrapped_token.clone());
+
+    // Mint the quote token to the IBC host to simulate market maker providing liquidity
+    st.app
+        .sudo(cw_multi_test::SudoMsg::Bank(
+            cw_multi_test::BankSudo::Mint {
+                to_address: st.ibc_host.to_string(),
+                amount: vec![quote_coin.clone()],
+            },
+        ))
+        .unwrap();
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![quote_coin])
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+
+    // Verify that a failure acknowledgment is returned instead of a revert
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_FAILURE,
+            inner_ack: Default::default(),
+        }
+        .abi_encode_params()
+    );
+
+    // Verify no tokens were transferred
+    let balance: cw20::BalanceResponse = st
+        .app
+        .wrap()
+        .query_wasm_smart(
+            &wrapped_token,
+            &Cw20QueryMsg::Balance {
+                address: st.minter.to_string(),
+            },
+        )
+        .unwrap();
+    assert_eq!(balance.balance.u128(), base_amount + 1000);
+}
+
+#[test]
+fn test_recv_packet_native_v2_wrap_ok() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ZERO;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let base_amount = 1000u128;
+
+    // Create metadata for V2 order
+    let admin = "union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua";
+    let code_id = st.cw20_base_code_id;
+    let metadata = FungibleAssetMetadata {
+        implementation: (admin.to_string(), code_id).abi_encode_params().into(),
+        initializer: serde_json::to_vec(&frissitheto::UpgradeMsg::<_, ()>::Init(
+            cw20_base::msg::InstantiateMsg {
+                name: "Test Token".to_string(),
+                symbol: "TEST".to_string(),
+                decimals: 6,
+                initial_balances: vec![],
+                mint: Some(cw20::MinterResponse {
+                    minter: st.minter.to_string(),
+                    cap: None,
+                }),
+                marketing: None,
+            },
+        ))
+        .unwrap()
+        .into(),
+    };
+
+    // Predict the wrapped token address using the metadata image
+    let metadata_image = keccak256(metadata.abi_encode_params());
+    let quote_token = st
+        .app
+        .wrap()
+        .query_wasm_smart::<PredictWrappedTokenResponse>(
+            st.zkgm.clone(),
+            &QueryMsg::PredictWrappedTokenV2 {
+                path: path.to_string(),
+                channel_id: destination_channel_id,
+                token: base_token.to_vec().into(),
+                metadata_image,
+            },
+        )
+        .unwrap()
+        .wrapped_token;
+
+    // Set rate limit for the predicted token
+    st.app
+        .execute(
+            st.rate_limiter.clone(),
+            wasm_execute(
+                st.zkgm.clone(),
+                &ExecuteMsg::SetBucketConfig {
+                    denom: quote_token.clone(),
+                    capacity: base_amount.into(),
+                    refill_rate: 1u32.into(),
+                    reset: false,
+                },
+                vec![],
+            )
+            .unwrap()
+            .into(),
+        )
+        .unwrap();
+
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: base_amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_PREIMAGE,
+                    metadata: metadata.abi_encode_params().into(),
+                    quote_token: quote_token.as_bytes().to_vec().into(),
+                    quote_amount: base_amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![]).unwrap().into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_SUCCESS,
+            inner_ack: FungibleAssetOrderAck {
+                fill_type: FILL_TYPE_PROTOCOL,
+                market_maker: Default::default()
+            }
+            .abi_encode_params()
+            .into(),
+        }
+        .abi_encode_params()
+    );
+}
+
+#[test]
+fn test_recv_packet_native_v2_unwrap_equal_amounts_ok() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ONE;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let amount = 1000u128;
+
+    let wrapped_token = st
+        .app
+        .instantiate_contract(
+            st.cw20_base_code_id,
+            admin.clone(),
+            &cw20_base::msg::InstantiateMsg {
+                name: "muno".to_string(),
+                symbol: "muno".to_string(),
+                decimals: 8,
+                initial_balances: vec![Cw20Coin {
+                    address: st.minter.to_string(),
+                    amount: (amount + 1000).into(),
+                }],
+                mint: None,
+                marketing: None,
+            },
+            &[],
+            "muno-token",
+            Some(admin.clone().to_string()),
+        )
+        .unwrap();
+
+    // Simulate outstanding balance using V2 channel balance for V2 operations
+    let metadata_image = H256::new([0u8; 32]); // matches the dummy metadata in the packet
+    increase_channel_balance_v2(
+        st.app.contract_storage_mut(&st.zkgm).as_mut(),
+        destination_channel_id,
+        reverse_channel_path(path).unwrap(),
+        wrapped_token.to_string(),
+        metadata_image,
+        amount.into(),
+    )
+    .unwrap();
+
+    // Set rate limit for the wrapped token
+    st.app
+        .execute(
+            st.rate_limiter.clone(),
+            wasm_execute(
+                st.zkgm.clone(),
+                &ExecuteMsg::SetBucketConfig {
+                    denom: wrapped_token.to_string(),
+                    capacity: amount.into(),
+                    refill_rate: 1u32.into(),
+                    reset: false,
+                },
+                vec![],
+            )
+            .unwrap()
+            .into(),
+        )
+        .unwrap();
+
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_IMAGE_UNWRAP,
+                    metadata: vec![0u8; 32].into(),
+                    quote_token: wrapped_token.as_bytes().to_vec().into(),
+                    quote_amount: amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![]).unwrap().into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_SUCCESS,
+            inner_ack: FungibleAssetOrderAck {
+                fill_type: FILL_TYPE_PROTOCOL,
+                market_maker: Default::default()
+            }
+            .abi_encode_params()
+            .into(),
+        }
+        .abi_encode_params()
+    );
+}
+
+#[test]
+fn test_recv_packet_native_v2_unwrap_greater_base_amount_ok() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ONE;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let base_amount = 1000u128;
+    let quote_amount = 800u128; // base_amount > quote_amount
+
+    let wrapped_token = st
+        .app
+        .instantiate_contract(
+            st.cw20_base_code_id,
+            admin.clone(),
+            &cw20_base::msg::InstantiateMsg {
+                name: "muno".to_string(),
+                symbol: "muno".to_string(),
+                decimals: 8,
+                initial_balances: vec![Cw20Coin {
+                    address: st.minter.to_string(),
+                    amount: (base_amount + 1000).into(),
+                }],
+                mint: None,
+                marketing: None,
+            },
+            &[],
+            "muno-token",
+            Some(admin.clone().to_string()),
+        )
+        .unwrap();
+
+    // For V2 unwrap operations with IMAGE_UNWRAP, use increase_channel_balance_v2 with metadata image
+    let metadata_image = H256::new([0u8; 32]); // matches the dummy metadata in the packet
+
+    increase_channel_balance_v2(
+        st.app.contract_storage_mut(&st.zkgm).as_mut(),
+        destination_channel_id,
+        reverse_channel_path(path).unwrap(),
+        wrapped_token.to_string(),
+        metadata_image,
+        base_amount.into(),
+    )
+    .unwrap();
+
+    // Set rate limit for the wrapped token
+    st.app
+        .execute(
+            st.rate_limiter.clone(),
+            wasm_execute(
+                st.zkgm.clone(),
+                &ExecuteMsg::SetBucketConfig {
+                    denom: wrapped_token.to_string(),
+                    capacity: base_amount.into(),
+                    refill_rate: 1u32.into(),
+                    reset: false,
+                },
+                vec![],
+            )
+            .unwrap()
+            .into(),
+        )
+        .unwrap();
+
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: base_amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_IMAGE_UNWRAP,
+                    metadata: metadata_image.get().to_vec().into(),
+                    quote_token: wrapped_token.as_bytes().to_vec().into(),
+                    quote_amount: quote_amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![]).unwrap().into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_SUCCESS,
+            inner_ack: FungibleAssetOrderAck {
+                fill_type: FILL_TYPE_PROTOCOL,
+                market_maker: Default::default()
+            }
+            .abi_encode_params()
+            .into(),
+        }
+        .abi_encode_params()
+    );
+}
+
+#[test]
+fn test_recv_packet_native_v2_invalid_metadata_type() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ZERO;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let base_amount = 1000u128;
+
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: base_amount.try_into().unwrap(),
+                    metadata_type: 99, // Invalid metadata type
+                    metadata: vec![0u8; 32].into(),
+                    quote_token: vec![0u8; 20].into(),
+                    quote_amount: base_amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![]).unwrap().into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_FAILURE,
+            inner_ack: Default::default(),
+        }
+        .abi_encode_params()
+    );
+}
+
+#[test]
+fn test_recv_packet_native_v2_market_maker_fill() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ZERO;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let base_amount = 1000u128;
+    let quote_amount = 800u128;
+
+    // Create a native token for quote that doesn't match the predicted wrapped token
+    let quote_token = "native_token";
+
+    // Create proper metadata for PREIMAGE type
+    let admin_str = "union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua";
+    let code_id = st.cw20_base_code_id;
+    let metadata = FungibleAssetMetadata {
+        implementation: (admin_str.to_string(), code_id).abi_encode_params().into(),
+        initializer: serde_json::to_vec(&frissitheto::UpgradeMsg::<_, ()>::Init(
+            cw20_base::msg::InstantiateMsg {
+                name: "Test Token".to_string(),
+                symbol: "TEST".to_string(),
+                decimals: 6,
+                initial_balances: vec![],
+                mint: Some(cw20::MinterResponse {
+                    minter: st.minter.to_string(),
+                    cap: None,
+                }),
+                marketing: None,
+            },
+        ))
+        .unwrap()
+        .into(),
+    };
+
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: base_amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_PREIMAGE,
+                    metadata: metadata.abi_encode_params().into(),
+                    quote_token: quote_token.as_bytes().to_vec().into(),
+                    quote_amount: quote_amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    // For market maker fill, provide the quote token as funds
+    let quote_coin = cosmwasm_std::Coin::new(quote_amount, quote_token);
+
+    // Mint the quote token to the IBC host to simulate market maker providing liquidity
+    st.app
+        .sudo(cw_multi_test::SudoMsg::Bank(
+            cw_multi_test::BankSudo::Mint {
+                to_address: st.ibc_host.to_string(),
+                amount: vec![quote_coin.clone()],
+            },
+        ))
+        .unwrap();
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![quote_coin])
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_SUCCESS,
+            inner_ack: FungibleAssetOrderAck {
+                fill_type: FILL_TYPE_MARKETMAKER,
+                market_maker: Default::default()
+            }
+            .abi_encode_params()
+            .into(),
+        }
+        .abi_encode_params()
+    );
+
+    // Verify that the receiver got the quote tokens
+    let balance = st.app.wrap().query_balance(admin, quote_token).unwrap();
+    assert_eq!(balance.amount.u128(), quote_amount);
+}
+
+#[test]
+fn test_recv_packet_native_v2_wrap_with_metadata_image_ok() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ZERO;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let base_amount = 1000u128;
+
+    // First, create the token with PREIMAGE metadata
+    let admin_str = "union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua";
+    let code_id = st.cw20_base_code_id;
+    let preimage_metadata = FungibleAssetMetadata {
+        implementation: (admin_str.to_string(), code_id).abi_encode_params().into(),
+        initializer: serde_json::to_vec(&frissitheto::UpgradeMsg::<_, ()>::Init(
+            cw20_base::msg::InstantiateMsg {
+                name: "Test Token".to_string(),
+                symbol: "TEST".to_string(),
+                decimals: 6,
+                initial_balances: vec![],
+                mint: Some(cw20::MinterResponse {
+                    minter: st.minter.to_string(),
+                    cap: None,
+                }),
+                marketing: None,
+            },
+        ))
+        .unwrap()
+        .into(),
+    };
+
+    // Calculate the metadata image from the preimage
+    let metadata_image = keccak256(preimage_metadata.abi_encode_params());
+
+    // Get the predicted token address using the metadata image
+    let quote_token = st
+        .app
+        .wrap()
+        .query_wasm_smart::<PredictWrappedTokenResponse>(
+            st.zkgm.clone(),
+            &QueryMsg::PredictWrappedTokenV2 {
+                path: path.to_string(),
+                channel_id: destination_channel_id,
+                token: base_token.to_vec().into(),
+                metadata_image,
+            },
+        )
+        .unwrap()
+        .wrapped_token;
+
+    // First create the token with PREIMAGE metadata
+    let preimage_packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: base_amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_PREIMAGE,
+                    metadata: preimage_metadata.abi_encode_params().into(),
+                    quote_token: quote_token.as_bytes().to_vec().into(),
+                    quote_amount: base_amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    // Set rate limit for the predicted token
+    st.app
+        .execute(
+            st.rate_limiter.clone(),
+            wasm_execute(
+                st.zkgm.clone(),
+                &ExecuteMsg::SetBucketConfig {
+                    denom: quote_token.clone(),
+                    capacity: Uint256::MAX,
+                    refill_rate: 1u32.into(),
+                    reset: false,
+                },
+                vec![],
+            )
+            .unwrap()
+            .into(),
+        )
+        .unwrap();
+
+    let preimage_msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: preimage_packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    // Execute the preimage creation
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &preimage_msg, vec![])
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+
+    // Now use the IMAGE metadata type (referencing the previously created token)
+    let image_packet = Packet {
+        source_channel_id: ChannelId!(2),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: base_amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_IMAGE,
+                    metadata: metadata_image.as_ref().to_vec().into(),
+                    quote_token: quote_token.as_bytes().to_vec().into(),
+                    quote_amount: base_amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let image_msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: image_packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &image_msg, vec![])
+                .unwrap()
+                .into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[image_packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_SUCCESS,
+            inner_ack: FungibleAssetOrderAck {
+                fill_type: FILL_TYPE_PROTOCOL,
+                market_maker: Default::default()
+            }
+            .abi_encode_params()
+            .into(),
+        }
+        .abi_encode_params()
+    );
+}
+
+#[test]
+fn test_recv_packet_native_v2_wrap_protocol_fill_ok() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ZERO;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let base_amount = 1000u128;
+
+    // Create metadata for V2 order that will result in protocol fill
+    let admin = "union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua";
+    let code_id = st.cw20_base_code_id;
+    let metadata = FungibleAssetMetadata {
+        implementation: (admin.to_string(), code_id).abi_encode_params().into(),
+        initializer: serde_json::to_vec(&frissitheto::UpgradeMsg::<_, ()>::Init(
+            cw20_base::msg::InstantiateMsg {
+                name: "Test Token".to_string(),
+                symbol: "TEST".to_string(),
+                decimals: 6,
+                initial_balances: vec![],
+                mint: Some(cw20::MinterResponse {
+                    minter: st.minter.to_string(),
+                    cap: None,
+                }),
+                marketing: None,
+            },
+        ))
+        .unwrap()
+        .into(),
+    };
+
+    // Predict the wrapped token address
+    let quote_token = st
+        .app
+        .wrap()
+        .query_wasm_smart::<PredictWrappedTokenResponse>(
+            st.zkgm.clone(),
+            &QueryMsg::PredictWrappedTokenV2 {
+                path: path.to_string(),
+                channel_id: destination_channel_id,
+                token: base_token.to_vec().into(),
+                metadata_image: keccak256(metadata.clone().abi_encode_params()),
+            },
+        )
+        .unwrap()
+        .wrapped_token;
+
+    // Set rate limit for the predicted token
+    st.app
+        .execute(
+            st.rate_limiter.clone(),
+            wasm_execute(
+                st.zkgm.clone(),
+                &ExecuteMsg::SetBucketConfig {
+                    denom: quote_token.clone(),
+                    capacity: base_amount.into(),
+                    refill_rate: 1u32.into(),
+                    reset: false,
+                },
+                vec![],
+            )
+            .unwrap()
+            .into(),
+        )
+        .unwrap();
+
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: base_amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_PREIMAGE,
+                    metadata: metadata.abi_encode_params().into(),
+                    quote_token: quote_token.as_bytes().to_vec().into(),
+                    quote_amount: base_amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![]).unwrap().into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_SUCCESS,
+            inner_ack: FungibleAssetOrderAck {
+                fill_type: FILL_TYPE_PROTOCOL,
+                market_maker: Default::default()
+            }
+            .abi_encode_params()
+            .into(),
+        }
+        .abi_encode_params()
+    );
+}
+
+#[test]
+fn test_recv_packet_native_v2_unwrap_with_v1_metadata_image() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ONE;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let amount = 1000u128;
+
+    let wrapped_token = st
+        .app
+        .instantiate_contract(
+            st.cw20_base_code_id,
+            admin.clone(),
+            &cw20_base::msg::InstantiateMsg {
+                name: "muno".to_string(),
+                symbol: "muno".to_string(),
+                decimals: 8,
+                initial_balances: vec![Cw20Coin {
+                    address: st.minter.to_string(),
+                    amount: (amount + 1000).into(),
+                }],
+                mint: None,
+                marketing: None,
+            },
+            &[],
+            "muno-token",
+            Some(admin.clone().to_string()),
+        )
+        .unwrap();
+
+    increase_channel_balance(
+        st.app.contract_storage_mut(&st.zkgm).as_mut(),
+        destination_channel_id,
+        reverse_channel_path(path).unwrap(),
+        wrapped_token.to_string(),
+        amount.into(),
+    )
+    .unwrap();
+
+    // Set rate limit for the wrapped token
+    st.app
+        .execute(
+            st.rate_limiter.clone(),
+            wasm_execute(
+                st.zkgm.clone(),
+                &ExecuteMsg::SetBucketConfig {
+                    denom: wrapped_token.to_string(),
+                    capacity: amount.into(),
+                    refill_rate: 1u32.into(),
+                    reset: false,
+                },
+                vec![],
+            )
+            .unwrap()
+            .into(),
+        )
+        .unwrap();
+
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_IMAGE_UNWRAP,
+                    metadata: FUNGIBLE_ASSET_METADATA_IMAGE_PREDICT_V1
+                        .get()
+                        .to_vec()
+                        .into(),
+                    quote_token: wrapped_token.as_bytes().to_vec().into(),
+                    quote_amount: amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![]).unwrap().into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_SUCCESS,
+            inner_ack: FungibleAssetOrderAck {
+                fill_type: FILL_TYPE_PROTOCOL,
+                market_maker: Default::default()
+            }
+            .abi_encode_params()
+            .into(),
+        }
+        .abi_encode_params()
+    );
+}
+
+#[test]
+fn test_recv_packet_native_v2_unwrap_no_outstanding_balance() {
+    let admin = Addr::unchecked("union12qdvmw22n72mem0ysff3nlyj2c76cuy4x60lua");
+    let mut st = init_test_state(admin.clone());
+    let path = U256::ONE;
+    let destination_channel_id = ChannelId!(10);
+    let base_token = hex_literal::hex!("DEAFBABE");
+    let amount = 1000u128;
+
+    let wrapped_token = st
+        .app
+        .instantiate_contract(
+            st.cw20_base_code_id,
+            admin.clone(),
+            &cw20_base::msg::InstantiateMsg {
+                name: "muno".to_string(),
+                symbol: "muno".to_string(),
+                decimals: 8,
+                initial_balances: vec![Cw20Coin {
+                    address: st.minter.to_string(),
+                    amount: (amount + 1000).into(),
+                }],
+                mint: None,
+                marketing: None,
+            },
+            &[],
+            "muno-token",
+            Some(admin.clone().to_string()),
+        )
+        .unwrap();
+
+    // Don't set any outstanding balance - this should cause failure
+
+    let packet = Packet {
+        source_channel_id: ChannelId!(1),
+        destination_channel_id,
+        data: ZkgmPacket {
+            salt: Default::default(),
+            path,
+            instruction: Instruction {
+                version: INSTR_VERSION_2,
+                opcode: OP_FUNGIBLE_ASSET_ORDER,
+                operand: FungibleAssetOrderV2 {
+                    sender: vec![].into(),
+                    receiver: admin.as_bytes().to_vec().into(),
+                    base_token: base_token.to_vec().into(),
+                    base_amount: amount.try_into().unwrap(),
+                    metadata_type: FUNGIBLE_ASSET_METADATA_TYPE_IMAGE_UNWRAP,
+                    metadata: vec![0u8; 32].into(),
+                    quote_token: wrapped_token.as_bytes().to_vec().into(),
+                    quote_amount: amount.try_into().unwrap(),
+                }
+                .abi_encode_params()
+                .into(),
+            },
+        }
+        .abi_encode_params()
+        .into(),
+        timeout_height: Default::default(),
+        timeout_timestamp: Default::default(),
+    };
+
+    let msg = ExecuteMsg::IbcUnionMsg(IbcUnionMsg::OnRecvPacket {
+        caller: admin.to_string(),
+        packet: packet.clone(),
+        relayer: admin.to_string(),
+        relayer_msg: Default::default(),
+    });
+
+    st.app
+        .execute(
+            st.ibc_host.clone(),
+            wasm_execute(st.zkgm.clone(), &msg, vec![]).unwrap().into(),
+        )
+        .unwrap();
+
+    let ack = PACKET_ACK
+        .load(
+            st.app.contract_storage(&st.ibc_host).as_ref(),
+            commit_packets(&[packet]).into(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ack,
+        Ack {
+            tag: TAG_ACK_FAILURE,
+            inner_ack: Default::default(),
+        }
+        .abi_encode_params()
+    );
 }
 
 #[test]

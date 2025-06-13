@@ -108,13 +108,14 @@ _: {
           ucs03_type = "cw20";
           bech32_prefix = "union";
           apps = {
-            ucs03 = ucs03-configs.cw20 // {
-              rate_limit_disabled = true;
-            };
+            # ucs03 = ucs03-configs.cw20 // {
+            #   rate_limit_disabled = true;
+            # };
           };
           # lightclients = pkgs.lib.lists.remove "cometbls" (builtins.attrNames all-lightclients);
           lightclients = [
             "sui"
+            "trusted-mpt"
           ];
         }
         {
@@ -441,6 +442,11 @@ _: {
           dir = "sui";
           client-type = "sui";
         }
+        {
+          name = "parlia";
+          dir = "parlia";
+          client-type = "parlia";
+        }
       ];
 
       # client type => package name
@@ -492,7 +498,7 @@ _: {
           text = ''
             embed-commit-verifier extract <(curl -L \
               --silent \
-              '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/Code"&data=0x'"$(
+              '${rpc_url}/abci_query?path=%22/cosmwasm.wasm.v1.Query/Code%22&data=0x'"$(
                 buf \
                   convert \
                   ${cosmwasmProtoDefs}/cosmwasm.proto \
@@ -501,7 +507,7 @@ _: {
                     echo "{\"code_id\":$(
                       curl -L \
                         --silent \
-                        '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/ContractInfo"&data=0x'"$(
+                        '${rpc_url}/abci_query?path=%22/cosmwasm.wasm.v1.Query/ContractInfo%22&data=0x'"$(
                           buf \
                             convert \
                             ${cosmwasmProtoDefs}/cosmwasm.proto \
@@ -979,7 +985,7 @@ _: {
               MINTER_ADDRESS="$(
                 curl -L \
                   --silent \
-                  '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/SmartContractState"&data=0x'"$(
+                  '${rpc_url}/abci_query?path=%22/cosmwasm.wasm.v1.Query/SmartContractState%22&data=0x'"$(
                     buf \
                       convert \
                       ${cosmwasmProtoDefs}/cosmwasm.proto \
