@@ -87,8 +87,6 @@ import (
 	feemarketkeeper "github.com/skip-mev/feemarket/x/feemarket/keeper"
 	_ "github.com/skip-mev/feemarket/x/feemarket/types"
 
-	// this line is used by starport scaffolding # stargate/app/moduleImport
-
 	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 	tmproto "github.com/cometbft/cometbft/api/cometbft/types/v1"
 	"github.com/unionlabs/union/uniond/docs"
@@ -159,10 +157,9 @@ type App struct {
 	// Fee Market
 	FeeMarketKeeper feemarketkeeper.Keeper
 
-	// this line is used by starport scaffolding # stargate/app/keeperDeclaration
-
 	// simulation manager
-	sm *module.SimulationManager
+	sm           *module.SimulationManager
+	configurator module.Configurator
 }
 
 func init() {
@@ -177,11 +174,9 @@ func init() {
 // getGovProposalHandlers return the chain proposal handlers.
 func getGovProposalHandlers() []govclient.ProposalHandler {
 	var govProposalHandlers []govclient.ProposalHandler
-	// this line is used by starport scaffolding # stargate/app/govProposalHandlers
 
 	govProposalHandlers = append(govProposalHandlers,
 		paramsclient.ProposalHandler,
-		// this line is used by starport scaffolding # stargate/app/govProposalHandler
 	)
 
 	return govProposalHandlers
@@ -198,7 +193,6 @@ func AppConfig() depinject.Config {
 			map[string]module.AppModuleBasic{
 				genutiltypes.ModuleName: genutil.NewAppModuleBasic(genutiltypes.DefaultMessageValidator),
 				govtypes.ModuleName:     gov.NewAppModuleBasic(getGovProposalHandlers()),
-				// this line is used by starport scaffolding # stargate/appConfig/moduleBasic
 			},
 		),
 	)
@@ -263,7 +257,6 @@ func New(
 		&app.CircuitBreakerKeeper,
 		&app.POAKeeper,
 		&app.FeeMarketKeeper,
-		// this line is used by starport scaffolding # stargate/app/keeperDefinition
 	); err != nil {
 		panic(err)
 	}
@@ -311,6 +304,7 @@ func New(
 	}))
 
 	app.ModuleManager.RegisterInvariants(app.CrisisKeeper)
+	app.configurator = module.NewConfigurator(app.appCodec, app.MsgServiceRouter(), app.GRPCQueryRouter())
 
 	// create the simulation manager and define the order of the modules for deterministic simulations
 	overrideModules := map[string]module.AppModuleSimulation{
@@ -318,6 +312,8 @@ func New(
 	}
 	app.sm = module.NewSimulationManagerFromAppModules(app.ModuleManager.Modules, overrideModules)
 	app.sm.RegisterStoreDecoders()
+
+	app.setupUpgradeHandlers()
 
 	// A custom InitChainer sets if extra pre-init-genesis logic is required.
 	// This is necessary for manually registered modules that do not support app wiring.
@@ -335,7 +331,6 @@ func New(
 	}
 
 	return app, app.WasmKeeper.InitializePinnedCodes(app.NewUncachedContext(true, tmproto.Header{}))
-
 }
 
 // LegacyAmino returns App's amino codec.
