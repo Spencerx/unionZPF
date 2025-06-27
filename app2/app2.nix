@@ -37,7 +37,7 @@ _: {
             ../typescript-sdk
             ../ts-sdk
           ];
-          hash = "sha256-Rre5X8ATXG/dSr50+RJXZVwpMdSSNs+rxoe6oK0TdQg";
+          hash = "sha256-kjFwxPfawrFdnF4Jsd5UdRIsuIoDpg8HLSaz++6oB08=";
           buildInputs = deps;
           nativeBuildInputs = buildInputs;
           pnpmWorkspaces = [
@@ -86,7 +86,7 @@ _: {
               export VITE_SUPABASE_URL="${VITE_SUPABASE_URL}"
               export VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY}"
               pnpm install
-              pnpm run dev -- --host
+              pnpm run dev --host
             '';
           };
         };
@@ -95,6 +95,7 @@ _: {
           program = pkgs.writeShellApplication {
             name = "app-check-watch";
             runtimeInputs = deps;
+            # TODO: decrease threshold to "warning"
             text = ''
               ${ensureAtRepositoryRoot}
               cd app2/
@@ -102,7 +103,7 @@ _: {
               export PUBLIC_GIT_REV="${PUBLIC_GIT_REV}"
               export PUBLIC_LAST_MODIFIED_DATE="${PUBLIC_LAST_MODIFIED_DATE}"
               export PUBLIC_LAST_MODIFIED_EPOCH="${PUBLIC_LAST_MODIFIED_EPOCH}"
-              pnpm run check --watch --threshold warning
+              pnpm run check --watch --threshold error
             '';
           };
         };
@@ -114,7 +115,7 @@ _: {
             text = ''
               ${ensureAtRepositoryRoot}
               cd app2/
-              pnpm dlx gql.tada generate-schema --tsconfig ./tsconfig.json --output "./src/generated/schema.graphql" "https://graphql.union.build/v1/graphql"
+              pnpm dlx gql.tada generate-schema --tsconfig ./tsconfig.json --output "./src/generated/schema.graphql" "https://orion.james.union.build/v1/graphql"
               pnpm dlx gql.tada generate-output --disable-preprocessing --tsconfig ./tsconfig.json --output ./src/generated/graphql-env.d.ts
             '';
           };

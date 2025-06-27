@@ -7,6 +7,7 @@ import (
 	"cosmossdk.io/client/v2/autocli"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
+
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/config"
 	"github.com/cosmos/cosmos-sdk/client/flags"
@@ -17,6 +18,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/auth/tx"
 	authtxconfig "github.com/cosmos/cosmos-sdk/x/auth/tx/config"
 	"github.com/cosmos/cosmos-sdk/x/auth/types"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -31,7 +33,12 @@ func NewRootCmd() *cobra.Command {
 		clientCtx          client.Context
 	)
 
-	if err := depinject.Inject(
+	if err := depinject.InjectDebug(
+		depinject.Visualizer(func(dotGraph string) {
+			if depinjectOutPath, ok := os.LookupEnv("DEPINJECT_OUT_PATH"); ok {
+				os.WriteFile(depinjectOutPath, []byte(dotGraph), 0644)
+			}
+		}),
 		depinject.Configs(app.AppConfig(),
 			depinject.Supply(
 				log.NewNopLogger(),

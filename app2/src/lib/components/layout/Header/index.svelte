@@ -1,5 +1,6 @@
 <script lang="ts">
 import SharpBaselineArrowBackIcon from "$lib/components/icons/SharpBaselineArrowBackIcon.svelte"
+import Banner from "$lib/components/ui/Banner.svelte"
 import { totalErrorCount } from "$lib/stores/app-errors.svelte"
 import { uiStore } from "$lib/stores/ui.svelte"
 import Button from "../../ui/Button.svelte"
@@ -40,3 +41,5 @@ const { showNavigation = false }: Props = $props()
     {/if}
   </div>
 </header>
+
+<Banner />

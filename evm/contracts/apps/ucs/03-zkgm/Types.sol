@@ -43,9 +43,26 @@ struct FungibleAssetOrder {
     uint256 quoteAmount;
 }
 
+struct FungibleAssetOrderV2 {
+    bytes sender;
+    bytes receiver;
+    bytes baseToken;
+    uint256 baseAmount;
+    uint8 metadataType;
+    bytes metadata;
+    bytes quoteToken;
+    uint256 quoteAmount;
+}
+
+struct FungibleAssetMetadata {
+    bytes implementation;
+    bytes initializer;
+}
+
 struct Stake {
     uint256 tokenId;
     bytes governanceToken;
+    bytes32 governanceTokenMetadataImage;
     bytes sender;
     bytes beneficiary;
     bytes validator;
@@ -55,14 +72,24 @@ struct Stake {
 struct Unstake {
     uint256 tokenId;
     bytes governanceToken;
+    bytes32 governanceTokenMetadataImage;
     bytes sender;
     bytes validator;
-    uint256 amount;
 }
 
 struct WithdrawStake {
     uint256 tokenId;
     bytes governanceToken;
+    bytes32 governanceTokenMetadataImage;
+    bytes sender;
+    bytes beneficiary;
+}
+
+struct WithdrawRewards {
+    uint256 tokenId;
+    bytes governanceToken;
+    bytes32 governanceTokenMetadataImage;
+    bytes validator;
     bytes sender;
     bytes beneficiary;
 }
@@ -89,6 +116,10 @@ struct WithdrawStakeAck {
     uint256 amount;
 }
 
+struct WithdrawRewardsAck {
+    uint256 amount;
+}
+
 enum ZkgmStakeState {
     // The position doesn't exist yet.
     UNDEFINED,
@@ -96,6 +127,8 @@ enum ZkgmStakeState {
     STAKING,
     // The tokens are bonded and the position is being rewarded.
     STAKED,
+    // The rewards are being withdrawn.
+    WITHDRAWING_REWARDS,
     // The tokens are being unbonded, the position no longer earns rewards.
     UNSTAKING,
     // The tokens has been unstaked and withdrawn.
@@ -113,4 +146,9 @@ struct ZkgmStake {
     uint256 amount;
     // Time at which unbonding will complete (allows the NFT to be burnt in exchange for withdrawal).
     uint256 unstakingCompletion;
+}
+
+struct GovernanceToken {
+    bytes unwrappedToken;
+    bytes32 metadataImage;
 }

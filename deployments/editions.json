@@ -4,6 +4,12 @@
       "babylon.bbn-test-5": {
         "environment": "production"
       },
+      "bsc.97": {
+        "environment": "staging"
+      },
+      "osmosis.osmo-test-5": {
+        "environment": "staging"
+      },
       "corn.21000001": {
         "environment": "production"
       },
@@ -13,8 +19,11 @@
       "ethereum.17000": {
         "environment": "production"
       },
-      "sei.1328": {
+      "osmosis.osmo-test-5": {
         "environment": "staging"
+      },
+      "sei.1328": {
+        "environment": "production"
       },
       "xion.xion-testnet-2": {
         "environment": "production"

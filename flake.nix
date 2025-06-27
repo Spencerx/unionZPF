@@ -118,6 +118,10 @@
       url = "github:unionlabs/union/release/uniond/v1.0.0";
       flake = false;
     };
+    v1_1_0 = {
+      url = "github:unionlabs/union/release/uniond/v1.1.1";
+      flake = false;
+    };
   };
   outputs =
     inputs@{
@@ -346,7 +350,21 @@
                           unset LD_LIBRARY_PATH
                           EOF
 
+                          echo "patched cast"
+
                           chmod +x $out/bin/cast
+
+                          mv $out/bin/forge $out/bin/forge-cursed
+
+                          cat <<EOF >> $out/bin/forge
+                          export LD_LIBRARY_PATH=${lib.makeLibraryPath [ super.stdenv.cc.cc.lib ]}
+                          $out/bin/forge-cursed "\$@"
+                          unset LD_LIBRARY_PATH
+                          EOF
+
+                          chmod +x $out/bin/forge
+
+                          echo "patched forge"
                         '';
                     });
 
@@ -572,14 +590,14 @@
         };
     };
 
-  # nixConfig = {
-  #   extra-substituters = [
-  #     "https://union.cachix.org/"
-  #     "https://cache.garnix.io"
-  #   ];
-  #   extra-trusted-public-keys = [
-  #     "union.cachix.org-1:TV9o8jexzNVbM1VNBOq9fu8NK+hL6ZhOyOh0quATy+M="
-  #     "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
-  #   ];
-  # };
+  nixConfig = {
+    extra-substituters = [
+      # "https://union.cachix.org/"
+      "https://cache.garnix.io"
+    ];
+    extra-trusted-public-keys = [
+      # "union.cachix.org-1:TV9o8jexzNVbM1VNBOq9fu8NK+hL6ZhOyOh0quATy+M="
+      "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
+    ];
+  };
 }

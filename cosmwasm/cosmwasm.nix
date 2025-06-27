@@ -11,15 +11,8 @@ _: {
     }:
     let
       getDeployment =
-        let
-          json = builtins.fromJSON (builtins.readFile ../deployments/deployments.json);
-        in
-        chainId:
-        (pkgs.lib.lists.findSingle (deployment: deployment.chain_id == chainId)
-          (throw "deployment for ${chainId} not found")
-          (throw "many deployments for ${chainId} found")
-          json
-        ).deployments;
+        ucs04-chain-id:
+        (builtins.fromJSON (builtins.readFile ../deployments/deployments.json)).${ucs04-chain-id};
 
       # minified version of the protos found in https://github.com/CosmWasm/wasmd/tree/2e748fb4b860ee109123827f287949447f2cded7/proto/cosmwasm/wasm/v1
       cosmwasmProtoDefs = pkgs.writeTextDir "/cosmwasm.proto" ''
@@ -108,17 +101,19 @@ _: {
           ucs03_type = "cw20";
           bech32_prefix = "union";
           apps = {
-            ucs03 = ucs03-configs.cw20 // {
-              rate_limit_disabled = true;
-            };
+            # ucs03 = ucs03-configs.cw20 // {
+            #   rate_limit_disabled = true;
+            # };
           };
           # lightclients = pkgs.lib.lists.remove "cometbls" (builtins.attrNames all-lightclients);
           lightclients = [
             "sui"
+            "trusted-mpt"
           ];
         }
         {
           chain-id = "union-testnet-10";
+          ucs04-chain-id = "union.union-testnet-10";
           name = "union-testnet-10";
           rpc_url = "https://rpc.rpc-node.union-testnet-10.union.build";
           private_key = ''"$(op item get deployer --vault union-testnet-10 --field cosmos-private-key --reveal)"'';
@@ -139,6 +134,7 @@ _: {
             "trusted-mpt"
             "ethermint"
             "tendermint-bls"
+            "parlia"
             # "movement"
             "state-lens-ics23-mpt"
             # "state-lens-ics23-smt"
@@ -146,6 +142,7 @@ _: {
         }
         {
           chain-id = "union-1";
+          ucs04-chain-id = "union.union-1";
           name = "union";
           rpc_url = "https://rpc.rpc-node.union-1.union.build";
           private_key = ''"$(op item get deployer --vault union-testnet-10 --field cosmos-private-key --reveal)"'';
@@ -221,15 +218,16 @@ _: {
         }
         {
           chain-id = "osmo-test-5";
+          ucs04-chain-id = "osmosis.osmo-test-5";
           name = "osmosis-testnet";
           rpc_url = "https://osmosis-testnet-rpc.polkachu.com";
           private_key = ''"$(op item get deployer --vault union-testnet-10 --field cosmos-private-key --reveal)"'';
           gas_config = {
             type = "fixed";
-            gas_price = "0.05";
+            gas_price = "0.1";
             gas_denom = "uosmo";
-            gas_multiplier = "1.1";
-            max_gas = 10000000;
+            gas_multiplier = "1.2";
+            max_gas = 40000000;
           };
           apps = {
             ucs03 = ucs03-configs.osmosis_tokenfactory // {
@@ -245,6 +243,7 @@ _: {
         }
         {
           chain-id = "bbn-test-5";
+          ucs04-chain-id = "babylon.bbn-test-5";
           name = "babylon-testnet";
           rpc_url = "https://babylon-testnet-rpc.polkachu.com";
           private_key = ''"$(op item get deployer --vault union-testnet-10 --field cosmos-private-key --reveal)"'';
@@ -266,10 +265,12 @@ _: {
             "tendermint"
             "trusted-mpt"
             "state-lens-ics23-mpt"
+            "state-lens-ics23-ics23"
           ];
         }
         {
           chain-id = "bbn-1";
+          ucs04-chain-id = "babylon.bbn-1";
           name = "babylon";
           rpc_url = "https://babylon-rpc.polkachu.com";
           private_key = ''"$(op item get deployer --vault union-testnet-10 --field cosmos-private-key --reveal)"'';
@@ -319,6 +320,7 @@ _: {
         }
         {
           chain-id = "xion-testnet-2";
+          ucs04-chain-id = "xion.xion-testnet-2";
           name = "xion-testnet";
           rpc_url = "https://rpc.xion-testnet-2.burnt.com/";
           private_key = ''"$(op item get deployer --vault union-testnet-10 --field cosmos-private-key --reveal)"'';
@@ -441,6 +443,11 @@ _: {
           dir = "sui";
           client-type = "sui";
         }
+        {
+          name = "parlia";
+          dir = "parlia";
+          client-type = "parlia";
+        }
       ];
 
       # client type => package name
@@ -455,6 +462,7 @@ _: {
 
       ucs03-configs = {
         cw20 = {
+          type = "cw20";
           path = "${ucs03-zkgm.release}";
           cw_account_path = "${cw-account.release}";
           token_minter_path = "${cw20-token-minter.release}";
@@ -466,6 +474,7 @@ _: {
           rate_limit_disabled = false;
         };
         osmosis_tokenfactory = {
+          type = "osmosis-tokenfactory";
           rate_limit_disabled = false;
           path = "${ucs03-zkgm.release}";
           cw_account_path = "${cw-account.release}";
@@ -492,7 +501,7 @@ _: {
           text = ''
             embed-commit-verifier extract <(curl -L \
               --silent \
-              '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/Code"&data=0x'"$(
+              '${rpc_url}/abci_query?path=%22/cosmwasm.wasm.v1.Query/Code%22&data=0x'"$(
                 buf \
                   convert \
                   ${cosmwasmProtoDefs}/cosmwasm.proto \
@@ -501,7 +510,7 @@ _: {
                     echo "{\"code_id\":$(
                       curl -L \
                         --silent \
-                        '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/ContractInfo"&data=0x'"$(
+                        '${rpc_url}/abci_query?path=%22/cosmwasm.wasm.v1.Query/ContractInfo%22&data=0x'"$(
                           buf \
                             convert \
                             ${cosmwasmProtoDefs}/cosmwasm.proto \
@@ -550,7 +559,7 @@ _: {
             RUST_LOG=info \
               cosmwasm-deployer \
               deploy-full \
-              --contracts ${chain-deployments-json args} \
+              --contracts ${chain-contracts-config-json args} \
               ${if permissioned then "--permissioned " else ""} \
               --rpc-url ${rpc_url} \
               ${mk-gas-args gas_config}
@@ -560,7 +569,7 @@ _: {
       whitelist-relayers =
         {
           name,
-          chain-id,
+          ucs04-chain-id,
           rpc_url,
           gas_config,
           private_key,
@@ -576,7 +585,7 @@ _: {
               tx \
               whitelist-relayers \
               --rpc-url ${rpc_url} \
-              --contract ${(getDeployment chain-id).core.address} \
+              --contract ${(getDeployment ucs04-chain-id).core.address} \
               ${mk-gas-args gas_config} "$@"
           '';
         };
@@ -621,9 +630,14 @@ _: {
           '';
         };
 
-      chain-deployments-json =
-        { lightclients, apps, ... }:
-        pkgs.writeText "contracts.json" (
+      chain-contracts-config-json =
+        {
+          ucs04-chain-id,
+          lightclients,
+          apps,
+          ...
+        }:
+        pkgs.writeText "${ucs04-chain-id}.contracts-confg.json" (
           builtins.toJSON {
             core = ibc-union.release;
             lightclient = builtins.listToAttrs (
@@ -636,6 +650,22 @@ _: {
               ) (builtins.filter ({ name, ... }: builtins.elem name lightclients) all-lightclients)
             );
             app = apps;
+          }
+        );
+
+      chain-deployed-contracts-json =
+        {
+          ucs04-chain-id,
+          lightclients,
+          apps,
+          ...
+        }:
+        pkgs.writeText "${ucs04-chain-id}.deployed-contracts.json" (
+          builtins.toJSON {
+            lightclient = map ({ client-type, ... }: client-type) (
+              builtins.filter ({ name, ... }: builtins.elem name lightclients) all-lightclients
+            );
+            app = builtins.attrNames apps;
           }
         );
 
@@ -862,174 +892,30 @@ _: {
         crane.buildWasmContract "cosmwasm/osmosis-tokenfactory-token-minter"
           { };
 
-      # update-deployments-json deployer
       update-deployments-json =
         {
           name,
           rpc_url,
+          ucs04-chain-id,
+          lightclients,
           apps,
           ...
         }:
         pkgs.writeShellApplication {
-          name = "${name}-update-deployments-json";
+          name = "update-deployments-json-${name}";
           runtimeInputs = [
-            cosmwasm-deployer
-            ibc-union-contract-addresses
-            (get-git-rev { inherit rpc_url; })
-            pkgs.jq
-            pkgs.buf
-            pkgs.xxd
-            pkgs.curl
-            pkgs.moreutils
+            self'.packages.update-deployments
           ];
           text = ''
             ${ensureAtRepositoryRoot}
 
-            DEPLOYMENTS_FILE="deployments/deployments.json"
-            export DEPLOYMENTS_FILE
-
-            ADDRESSES=$(ibc-union-contract-addresses "$1")
-            echo "addresses: $ADDRESSES"
-
-            HEIGHTS=$(cosmwasm-deployer init-heights --rpc-url "${rpc_url}" --addresses <(echo "$ADDRESSES"))
-            echo "heights: $HEIGHTS"
-
-            echo "updating heights..."
-
-            DEPLOYMENTS=$(echo "$ADDRESSES" | jq \
-              --arg deployer "$1" \
-              --argjson heights "$HEIGHTS" \
-              '. as $in | {
-                deployer: $deployer,
-                core: {
-                  address: .core,
-                  height: $heights[.core]
-                },
-                lightclient: (reduce
-                  (.lightclient | keys[]) as $key
-                  ({};
-                    if
-                      $heights[$in.lightclient[$key]] != null
-                    then
-                      . + {
-                        ($key): {
-                          address: $in.lightclient[$key],
-                          height: $heights[$in.lightclient[$key]]
-                        }
-                      }
-                    else
-                      .
-                    end
-                  )
-                ),
-                app: (reduce
-                  (.app | keys[]) as $key
-                  ({};
-                    if
-                      $heights[$in.app[$key]] != null
-                    then
-                      . + {
-                        ($key): {
-                          address: $in.app[$key],
-                          height: $heights[$in.app[$key]]
-                        }
-                      }
-                    else
-                      .
-                    end
-                  )
-                ),
-              }')
-
-            echo "deployments: $DEPLOYMENTS"
-
-            echo "updating commits..."
-
-            DEPLOYMENTS=$(
-              echo "$DEPLOYMENTS" \
-                | jq '.core.commit = $commit' \
-                  --arg commit "$(get-git-rev "$(echo "$ADDRESSES" | jq .core -r)")"
-            )
-
-            for key in lightclient app ; do
-              echo "key: $key"
-                while read -r subkey ; do
-                  echo "$key: $subkey"
-                  DEPLOYMENTS=$(
-                    echo "$DEPLOYMENTS" \
-                      | jq '.[$key][$subkey].commit = $commit' \
-                        --arg subkey "$subkey" \
-                        --arg key "$key" \
-                        --arg commit "$(
-                          get-git-rev "$(
-                            echo "$ADDRESSES" \
-                              | jq -r '.[$key][$subkey]' \
-                                --arg subkey "$subkey" \
-                                --arg key "$key"
-                          )"
-                        )"
-                  )
-                done <<< "$(echo "$DEPLOYMENTS" \
-                  | jq -r '.[$key] | keys[]' \
-                    --arg key "$key")"
-            done
-
-            # get the ucs03 minter address and info
-            if [ "$(echo "$ADDRESSES" | jq '.app | has("ucs03")')" == "true" ]; then
-              MINTER_ADDRESS="$(
-                curl -L \
-                  --silent \
-                  '${rpc_url}/abci_query?path="/cosmwasm.wasm.v1.Query/SmartContractState"&data=0x'"$(
-                    buf \
-                      convert \
-                      ${cosmwasmProtoDefs}/cosmwasm.proto \
-                      --type=cosmwasm.QuerySmartContractStateRequest \
-                      --from=<(
-                        echo \
-                          "{\"address\":\"$(
-                            echo "$ADDRESSES" | jq -r '.app.ucs03'
-                          )\",\"query_data\":\"$(
-                            echo '{"get_minter":{}}' | base64 -w0
-                          )\"}"
-                      )#format=json \
-                      | xxd -c 0 -ps
-                    )" \
-                    | jq .result.response.value -r \
-                    | base64 -d \
-                    | buf \
-                      convert \
-                      ${cosmwasmProtoDefs}/cosmwasm.proto \
-                      --type=cosmwasm.QuerySmartContractStateResponse \
-                      --from=-#format=binpb \
-                    | jq .data -r \
-                    | base64 -d \
-                    | jq . -r
-                )"
-
-              echo "minter_address: $MINTER_ADDRESS"
-
-              DEPLOYMENTS=$(
-                echo "$DEPLOYMENTS" \
-                  | jq '.app.ucs03.minter = { type: $type, address: $address, commit: $commit }' \
-                    --arg type ${builtins.elemAt (builtins.attrNames apps.ucs03.token_minter_config) 0} \
-                    --arg address "$MINTER_ADDRESS" \
-                    --arg commit "$(get-git-rev "$MINTER_ADDRESS")"
-              )
-            fi
-
-            echo "deployments: $DEPLOYMENTS"
-
-            CHAIN_ID="$(curl -L --silent ${rpc_url}/status | jq .result.node_info.network -r)"
-            export CHAIN_ID
-
-            echo "chain id: $CHAIN_ID"
-
-            jq \
-              '. |= map(if .chain_id == $chain_id then .deployments = $deployments else . end)' \
-              "$DEPLOYMENTS_FILE" \
-              --arg chain_id "$CHAIN_ID" \
-              --argjson deployments "$DEPLOYMENTS" \
-            | sponge "$DEPLOYMENTS_FILE"
+            RUST_LOG=info update-deployments \
+              "deployments/deployments.json" \
+              ${ucs04-chain-id} \
+              --rpc-url ${rpc_url} \
+              ${pkgs.lib.concatMapStringsSep " " (lc: "--lightclient ${lc}") lightclients} \
+              ${if apps ? ucs03 then "--ucs03 --ucs03-minter ${apps.ucs03.type}" else ""} \
+              ${if apps ? ucs00 then "--ucs00" else ""}
           '';
         };
     in
@@ -1053,25 +939,23 @@ _: {
               update-deployments-json = pkgs.writeShellApplication {
                 name = "update-deployments-json";
                 text =
-                  # TODO: Merge this script with the one in evm.nix
                   let
-                    deployments = builtins.filter (deployment: deployment.ibc_interface == "ibc-cosmwasm") (
+                    deployments = pkgs.lib.filterAttrs (_: deployment: deployment.ibc_interface == "ibc-cosmwasm") (
                       builtins.fromJSON (builtins.readFile ../deployments/deployments.json)
                     );
                     getNetwork =
-                      chainId:
-                      pkgs.lib.lists.findSingle (network: network.chain-id == chainId)
-                        (throw "no network found with chain id ${chainId}")
-                        (throw "many networks with chain id ${chainId} found")
+                      ucs04chainId:
+                      pkgs.lib.lists.findSingle (network: network.ucs04-chain-id or null == ucs04chainId)
+                        (throw "no network found with ucs04 chain id ${ucs04chainId}")
+                        (throw "many networks with ucs04 chain id ${ucs04chainId} found")
                         networks;
                   in
-                  pkgs.lib.concatMapStringsSep "\n\n" (entry: ''
-                    echo "updating ${entry.universal_chain_id}"
-                    ${
-                      pkgs.lib.getExe
-                        self'.packages.cosmwasm-scripts.${(getNetwork entry.chain_id).name}.update-deployments-json
-                    } ${entry.deployments.deployer}
-                  '') deployments;
+                  pkgs.lib.concatMapStringsSep "\n\n" (ucs04ChainId: ''
+                    echo "updating ${ucs04ChainId}"
+                    ${pkgs.lib.getExe
+                      self'.packages.cosmwasm-scripts.${(getNetwork ucs04ChainId).name}.update-deployments-json
+                    }
+                  '') (builtins.attrNames deployments);
               };
             }
             // (pkgs.mkRootDrv "cosmwasm-scripts" (
@@ -1080,7 +964,8 @@ _: {
                   inherit (chain) name;
                   value = pkgs.mkRootDrv chain.name (
                     {
-                      chain-deployments-json = chain-deployments-json chain;
+                      chain-contracts-config-json = chain-contracts-config-json chain;
+                      chain-deployed-contracts-json = chain-deployed-contracts-json chain;
                       deploy = deploy chain;
                       update-deployments-json = update-deployments-json chain;
                       finalize-deployment = finalize-deployment chain;

@@ -22,12 +22,11 @@ use jsonrpsee::{
 use protos::cosmwasm::wasm::v1::{QuerySmartContractStateRequest, QuerySmartContractStateResponse};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use tracing::{error, instrument, trace};
+use tracing::{error, instrument, trace, warn};
 use unionlabs::{
-    bech32::Bech32,
     ibc::core::client::height::Height,
     option_unwrap,
-    primitives::{Bytes, H256},
+    primitives::{Bech32, Bytes, H256},
     ErrorReporter,
 };
 use voyager_sdk::{
@@ -520,7 +519,7 @@ fn rpc_error<E: Error>(
 ) -> impl FnOnce(E) -> ErrorObjectOwned {
     move |e| {
         let message = format!("{message}: {}", ErrorReporter(e));
-        error!(%message, data = %data.as_ref().unwrap_or(&serde_json::Value::Null));
+        warn!(%message, data = %data.as_ref().unwrap_or(&serde_json::Value::Null));
         ErrorObject::owned(-1, message, data)
     }
 }

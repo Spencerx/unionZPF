@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tracing::{debug, error, info, info_span, instrument, trace, warn};
 use unionlabs::{
-    bech32::Bech32,
     ibc::core::{
         channel::{self},
         client::height::Height,
@@ -30,7 +29,7 @@ use unionlabs::{
     id::{ChannelId, ConnectionId, PortId},
     never::Never,
     option_unwrap,
-    primitives::H256,
+    primitives::{Bech32, H256},
     ErrorReporter,
 };
 use voyager_sdk::{
@@ -43,7 +42,7 @@ use voyager_sdk::{
         PluginMessage, VoyagerMessage,
     },
     plugin::Plugin,
-    primitives::{ChainId, ClientInfo, ClientType, IbcSpec, QueryHeight},
+    primitives::{ChainId, ClientInfo, ClientType, QueryHeight},
     rpc::{types::PluginInfo, PluginServer, FATAL_JSONRPC_ERROR_CODE},
     vm::{call, conc, data, noop, pass::PassResult, seq, Op},
     ExtensionsExt, VoyagerClient,
@@ -158,7 +157,7 @@ impl Plugin for Module {
         PluginInfo {
             name: plugin_name(&config.chain_id),
             interest_filter: simple_take_filter(format!(
-                r#"[.. | ."@type"? == "fetch_blocks" and ."@value".chain_id == "{}"] | any"#,
+                r#"[.. | (."@type"? == "index" or ."@type"? == "index_range") and ."@value".chain_id == "{}"] | any"#,
                 config.chain_id
             )),
         }
@@ -316,11 +315,21 @@ impl PluginServer<ModuleCall, Never> for Module {
             ready: msgs
                 .into_iter()
                 .map(|op| match op {
-                    Op::Call(Call::FetchBlocks(fetch)) if fetch.chain_id == self.chain_id => {
+                    Op::Call(Call::Index(fetch)) if fetch.chain_id == self.chain_id => {
                         call(PluginMessage::new(
                             self.plugin_name(),
                             ModuleCall::from(FetchBlocks {
                                 height: fetch.start_height,
+                                until: None,
+                            }),
+                        ))
+                    }
+                    Op::Call(Call::IndexRange(fetch)) if fetch.chain_id == self.chain_id => {
+                        call(PluginMessage::new(
+                            self.plugin_name(),
+                            ModuleCall::from(FetchBlocks {
+                                height: fetch.range.from_height(),
+                                until: Some(fetch.range.to_height()),
                             }),
                         ))
                     }
@@ -345,8 +354,8 @@ impl PluginServer<ModuleCall, Never> for Module {
     #[instrument(skip_all, fields(chain_id = %self.chain_id))]
     async fn call(&self, e: &Extensions, msg: ModuleCall) -> RpcResult<Op<VoyagerMessage>> {
         match msg {
-            ModuleCall::FetchBlocks(FetchBlocks { height }) => {
-                self.fetch_blocks(e.voyager_client()?, height).await
+            ModuleCall::FetchBlocks(FetchBlocks { height, until }) => {
+                self.fetch_blocks(e.voyager_client()?, height, until).await
             }
             ModuleCall::FetchBlock(FetchBlock {
                 already_seen_events,
@@ -372,7 +381,7 @@ fn rpc_error<E: Error>(
 ) -> impl FnOnce(E) -> ErrorObjectOwned {
     move |e| {
         let message = format!("{message}: {}", ErrorReporter(e));
-        error!(%message, data = %data.as_ref().unwrap_or(&serde_json::Value::Null));
+        warn!(%message, data = %data.as_ref().unwrap_or(&serde_json::Value::Null));
         ErrorObject::owned(-1, message, data)
     }
 }
@@ -383,12 +392,32 @@ impl Module {
         &self,
         voyager_client: &VoyagerClient,
         height: Height,
+        until: Option<Height>,
     ) -> RpcResult<Op<VoyagerMessage>> {
+        if let Some(until) = until {
+            if height.height() > until.height() {
+                return Err(ErrorObject::owned(
+                    FATAL_JSONRPC_ERROR_CODE,
+                    format!("height {height} cannot be greater than the until height {until}"),
+                    None::<()>,
+                ));
+            } else if height.height() == until.height() {
+                // if this is a ranged fetch, we need to fetch the upper bound of the range individually since FetchBlocks is exclusive on the upper bound
+                return Ok(call(PluginMessage::new(
+                    self.plugin_name(),
+                    ModuleCall::from(FetchBlock {
+                        already_seen_events: None,
+                        height,
+                    }),
+                )));
+            }
+        }
+
         let latest_height = voyager_client
             .query_latest_height(self.chain_id.clone(), true)
             .await?;
 
-        info!(%latest_height, %height, "fetching blocks");
+        info!(%latest_height, %height, ?until, "fetching blocks");
 
         if !height.revision_matches(&latest_height) {
             return Err(ErrorObject::owned(
@@ -401,7 +430,7 @@ impl Module {
             ));
         }
 
-        let continuation = |next_height| {
+        let continuation = |next_height: Height| {
             seq([
                 // TODO: Make this a config param
                 call(WaitForHeight {
@@ -413,6 +442,7 @@ impl Module {
                     self.plugin_name(),
                     ModuleCall::from(FetchBlocks {
                         height: next_height,
+                        until,
                     }),
                 )),
             ])
@@ -427,9 +457,13 @@ impl Module {
                     .clamp(1, self.chunk_block_fetch_size)
                     + height.height();
 
+                let next_height =
+                    next_height.min(until.map_or(next_height, |until| until.height()));
+
                 info!(
                     from_height = height.height(),
                     to_height = next_height,
+                    ?until,
                     "batch fetching blocks in range {height}..{next_height}"
                 );
 
@@ -450,22 +484,6 @@ impl Module {
                         ))]),
                 ))
             }
-            // // height == latest_height
-            //  => {
-            //     info!("requested fetch height is latest finalized height ({height})");
-
-            //     Ok(conc([
-            //         call(PluginMessage::new(
-            //             self.plugin_name(),
-            //             ModuleCall::from(FetchBlock {
-            //                 already_seen_events: None,
-            //                 height,
-            //             }),
-            //         )),
-            //         continuation(height.increment()),
-            //     ]))
-            // }
-            // height > latest_height
             Ordering::Greater => {
                 warn!(
                     "the latest finalized height ({latest_height}) \
@@ -689,14 +707,13 @@ impl Module {
                     )
                     .await?;
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcClassic>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcClassic::ID,
-                    event: into_value::<ibc_classic_spec::FullEvent>(match event {
+                    match event {
                         IbcEvent::CreateClient {
                             client_id,
                             client_type,
@@ -772,8 +789,8 @@ impl Module {
                         }
                         .into(),
                         _ => unreachable!("who needs flow typing"),
-                    }),
-                }))
+                    },
+                )))
             }
 
             IbcEvent::ChannelOpenInit {
@@ -804,14 +821,13 @@ impl Module {
                     )
                     .await?;
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcClassic>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcClassic::ID,
-                    event: into_value::<ibc_classic_spec::FullEvent>(match event {
+                    match event {
                         IbcEvent::ChannelOpenInit {
                             port_id,
                             channel_id,
@@ -845,8 +861,8 @@ impl Module {
                         }
                         .into(),
                         _ => unreachable!("who needs flow typing"),
-                    }),
-                }))
+                    },
+                )))
             }
 
             IbcEvent::ChannelOpenAck {
@@ -894,14 +910,13 @@ impl Module {
                     )
                     .await?;
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcClassic>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcClassic::ID,
-                    event: into_value::<ibc_classic_spec::FullEvent>(match event {
+                    match event {
                         IbcEvent::ChannelOpenAck {
                             port_id,
                             channel_id,
@@ -935,8 +950,8 @@ impl Module {
                         }
                         .into(),
                         _ => unreachable!("who needs flow typing"),
-                    }),
-                }))
+                    },
+                )))
             }
             // packet origin is this chain
             IbcEvent::SendPacket {
@@ -969,28 +984,25 @@ impl Module {
                     )
                     .await?;
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcClassic>(
+                    self.chain_id.clone(),
                     client_info,
                     counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcClassic::ID,
-                    event: into_value::<ibc_classic_spec::FullEvent>(
-                        ibc_classic_spec::SendPacket {
-                            packet_data: packet_data_hex.into_encoding(),
-                            packet: ibc_classic_spec::PacketMetadata {
-                                sequence: packet_sequence,
-                                source_channel,
-                                destination_channel,
-                                channel_ordering,
-                                timeout_height: packet_timeout_height,
-                                timeout_timestamp: packet_timeout_timestamp.as_nanos(),
-                            },
-                        }
-                        .into(),
-                    ),
-                }))
+                    ibc_classic_spec::SendPacket {
+                        packet_data: packet_data_hex.into_encoding(),
+                        packet: ibc_classic_spec::PacketMetadata {
+                            sequence: packet_sequence,
+                            source_channel,
+                            destination_channel,
+                            channel_ordering,
+                            timeout_height: packet_timeout_height,
+                            timeout_timestamp: packet_timeout_timestamp.as_nanos(),
+                        },
+                    }
+                    .into(),
+                )))
             }
             IbcEvent::TimeoutPacket {
                 packet_timeout_height,
@@ -1021,27 +1033,24 @@ impl Module {
                     )
                     .await?;
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcClassic>(
+                    self.chain_id.clone(),
                     client_info,
                     counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcClassic::ID,
-                    event: into_value::<ibc_classic_spec::FullEvent>(
-                        ibc_classic_spec::TimeoutPacket {
-                            packet: ibc_classic_spec::PacketMetadata {
-                                sequence: packet_sequence,
-                                source_channel,
-                                destination_channel,
-                                channel_ordering,
-                                timeout_height: packet_timeout_height,
-                                timeout_timestamp: packet_timeout_timestamp.as_nanos(),
-                            },
-                        }
-                        .into(),
-                    ),
-                }))
+                    ibc_classic_spec::TimeoutPacket {
+                        packet: ibc_classic_spec::PacketMetadata {
+                            sequence: packet_sequence,
+                            source_channel,
+                            destination_channel,
+                            channel_ordering,
+                            timeout_height: packet_timeout_height,
+                            timeout_timestamp: packet_timeout_timestamp.as_nanos(),
+                        },
+                    }
+                    .into(),
+                )))
             }
             IbcEvent::AcknowledgePacket {
                 packet_timeout_height,
@@ -1072,27 +1081,24 @@ impl Module {
                     )
                     .await?;
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcClassic>(
+                    self.chain_id.clone(),
                     client_info,
                     counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcClassic::ID,
-                    event: into_value::<ibc_classic_spec::FullEvent>(
-                        ibc_classic_spec::AcknowledgePacket {
-                            packet: ibc_classic_spec::PacketMetadata {
-                                sequence: packet_sequence,
-                                source_channel,
-                                destination_channel,
-                                channel_ordering,
-                                timeout_height: packet_timeout_height,
-                                timeout_timestamp: packet_timeout_timestamp.as_nanos(),
-                            },
-                        }
-                        .into(),
-                    ),
-                }))
+                    ibc_classic_spec::AcknowledgePacket {
+                        packet: ibc_classic_spec::PacketMetadata {
+                            sequence: packet_sequence,
+                            source_channel,
+                            destination_channel,
+                            channel_ordering,
+                            timeout_height: packet_timeout_height,
+                            timeout_timestamp: packet_timeout_timestamp.as_nanos(),
+                        },
+                    }
+                    .into(),
+                )))
             }
             // packet origin is the counterparty chain (if i put this comment above this pattern rustfmt explodes)
             IbcEvent::WriteAcknowledgement {
@@ -1125,29 +1131,26 @@ impl Module {
                     )
                     .await?;
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcClassic>(
+                    self.chain_id.clone(),
                     client_info,
                     counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcClassic::ID,
-                    event: into_value::<ibc_classic_spec::FullEvent>(
-                        ibc_classic_spec::WriteAcknowledgement {
-                            packet_data: packet_data_hex.into_encoding(),
-                            packet_ack: packet_ack_hex.into_encoding(),
-                            packet: ibc_classic_spec::PacketMetadata {
-                                sequence: packet_sequence,
-                                source_channel,
-                                destination_channel,
-                                channel_ordering,
-                                timeout_height: packet_timeout_height,
-                                timeout_timestamp: packet_timeout_timestamp.as_nanos(),
-                            },
-                        }
-                        .into(),
-                    ),
-                }))
+                    ibc_classic_spec::WriteAcknowledgement {
+                        packet_data: packet_data_hex.into_encoding(),
+                        packet_ack: packet_ack_hex.into_encoding(),
+                        packet: ibc_classic_spec::PacketMetadata {
+                            sequence: packet_sequence,
+                            source_channel,
+                            destination_channel,
+                            channel_ordering,
+                            timeout_height: packet_timeout_height,
+                            timeout_timestamp: packet_timeout_timestamp.as_nanos(),
+                        },
+                    }
+                    .into(),
+                )))
             }
             IbcEvent::RecvPacket {
                 packet_data_hex,
@@ -1179,28 +1182,25 @@ impl Module {
                     )
                     .await?;
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcClassic>(
+                    self.chain_id.clone(),
                     client_info,
                     counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcClassic::ID,
-                    event: into_value::<ibc_classic_spec::FullEvent>(
-                        ibc_classic_spec::RecvPacket {
-                            packet_data: packet_data_hex.into_encoding(),
-                            packet: ibc_classic_spec::PacketMetadata {
-                                sequence: packet_sequence,
-                                source_channel,
-                                destination_channel,
-                                channel_ordering,
-                                timeout_height: packet_timeout_height,
-                                timeout_timestamp: packet_timeout_timestamp.as_nanos(),
-                            },
-                        }
-                        .into(),
-                    ),
-                }))
+                    ibc_classic_spec::RecvPacket {
+                        packet_data: packet_data_hex.into_encoding(),
+                        packet: ibc_classic_spec::PacketMetadata {
+                            sequence: packet_sequence,
+                            source_channel,
+                            destination_channel,
+                            channel_ordering,
+                            timeout_height: packet_timeout_height,
+                            timeout_timestamp: packet_timeout_timestamp.as_nanos(),
+                        },
+                    }
+                    .into(),
+                )))
             }
             IbcEvent::WasmCreateClient {
                 client_id,
@@ -1222,15 +1222,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmUpdateClient {
                 client_id,
@@ -1253,15 +1252,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
-                    client_info: client_info.clone(),
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
+                    client_info.clone(),
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmConnectionOpenInit {
                 connection_id,
@@ -1285,15 +1283,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmConnectionOpenTry {
                 connection_id,
@@ -1319,15 +1316,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmConnectionOpenAck {
                 connection_id,
@@ -1353,15 +1349,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmConnectionOpenConfirm {
                 connection_id,
@@ -1387,15 +1382,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmChannelOpenInit {
                 port_id,
@@ -1435,15 +1429,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmChannelOpenTry {
                 port_id,
@@ -1485,15 +1478,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmChannelOpenAck {
                 port_id,
@@ -1542,15 +1534,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
 
             IbcEvent::WasmChannelOpenConfirm {
@@ -1600,15 +1591,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmPacketSend {
                 packet_source_channel_id,
@@ -1701,15 +1691,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmBatchSend {
                 channel_id,
@@ -1771,15 +1760,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmPacketAck {
                 acknowledgement,
@@ -1858,15 +1846,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmPacketRecv {
                 maker: _,
@@ -1961,15 +1948,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
             IbcEvent::WasmWriteAck {
                 acknowledgement,
@@ -2063,15 +2049,14 @@ impl Module {
 
                 ibc_union_spec::log_event(&event, &self.chain_id);
 
-                Ok(data(ChainEvent {
-                    chain_id: self.chain_id.clone(),
+                Ok(data(ChainEvent::new::<IbcUnion>(
+                    self.chain_id.clone(),
                     client_info,
-                    counterparty_chain_id: client_state_meta.counterparty_chain_id,
+                    client_state_meta.counterparty_chain_id,
                     tx_hash,
                     provable_height,
-                    ibc_spec_id: IbcUnion::ID,
-                    event: into_value::<ibc_union_spec::event::FullEvent>(event),
-                }))
+                    event,
+                )))
             }
         }
     }
