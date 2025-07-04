@@ -247,7 +247,9 @@ export class RawTransferDataSvelte {
     this.setWithoutUrlUpdate({
       source: currentDestination,
       destination: currentSource,
-      asset: newAsset
+      asset: newAsset,
+      receiver: "",
+      sender: ""
     })
     
     // Update URL after all changes are made
@@ -260,4 +262,5 @@ export class RawTransferDataSvelte {
       amount: this.amount
     })
   }
+
 }

@@ -11,15 +11,13 @@ import Wallet from "$lib/components/ui/Wallet/index.svelte"
 import { ENV, MAX_MOBILE_SIZE } from "$lib/constants"
 import { chainsQuery } from "$lib/queries/chains.svelte"
 import { channelsQuery } from "$lib/queries/channels.svelte.ts"
-import { runFork$, runPromise, runSync } from "$lib/runtime"
+import { runFork$ } from "$lib/runtime"
 import { settingsStore } from "$lib/stores/settings.svelte"
 import { keyboardShortcuts } from "$lib/stores/shortcuts.svelte"
 import { uiStore } from "$lib/stores/ui.svelte"
-import { wallets } from "$lib/stores/wallets.svelte"
 import { cn } from "$lib/utils"
 import { runExample } from "$lib/utils/convert-display.ts"
 import { interceptLogos } from "$lib/utils/intercept-logos.ts"
-import { Effect, Fiber, Option } from "effect"
 import { onMount, type Snippet } from "svelte"
 import type { PageData } from "./$types.ts"
 
@@ -36,8 +34,8 @@ onMount(() => {
 
   interceptLogos()
   runExample()
-  runFork$(chainsQuery(ENV()))
-  runFork$(channelsQuery())
+  runFork$(() => chainsQuery(ENV()))
+  runFork$(() => channelsQuery())
 
   keyboardShortcuts.addShortcut(["ctrl", "option", "shift", "keya"], () => {
     uiStore.overrideEdition = "app"

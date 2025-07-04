@@ -6,10 +6,12 @@ import "forge-std/Script.sol";
 
 import "solady/utils/CREATE3.sol";
 import "solady/utils/LibString.sol";
+import "solady/utils/LibBytes.sol";
 import "@openzeppelin-foundry-upgradeable/Upgrades.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
+import "../contracts/U.sol";
 import "../contracts/Manager.sol";
 import "../contracts/Multicall.sol";
 import "../contracts/clients/CometblsClient.sol";
@@ -22,6 +24,7 @@ import {StateLensIcs23SmtClient} from
 import "../contracts/apps/ucs/00-pingpong/PingPong.sol";
 import "../contracts/apps/ucs/03-zkgm/Zkgm.sol";
 import "../contracts/apps/ucs/06-funded-dispatch/FundedDispatch.sol";
+import "../contracts/tge/Vesting.sol";
 
 import "./Deployer.sol";
 
@@ -50,6 +53,7 @@ struct UCS03Parameters {
 library LIB_SALT {
     string constant MULTICALL = "lib/multicall-v2";
     string constant UCS03_ZKGM_ERC20_IMPL = "lib/zkgm-erc20-v2";
+    string constant U_IMPL = "lib/u-impl";
 }
 
 library IBC_SALT {
@@ -160,6 +164,14 @@ abstract contract UnionScript is UnionBase {
                 LIB_SALT.UCS03_ZKGM_ERC20_IMPL,
                 abi.encodePacked(type(ZkgmERC20).creationCode),
                 0
+            )
+        );
+    }
+
+    function deployU() internal returns (U) {
+        return U(
+            getDeployer().deploy(
+                LIB_SALT.U_IMPL, abi.encodePacked(type(U).creationCode), 0
             )
         );
     }
@@ -279,17 +291,20 @@ abstract contract UnionScript is UnionBase {
                         address(
                             new UCS03Zkgm(
                                 handler,
-                                params.weth,
-                                zkgmERC20,
-                                params.rateLimitEnabled,
                                 new UCS03ZkgmSendImpl(
                                     handler,
                                     params.weth,
+                                    zkgmERC20,
                                     params.nativeTokenName,
                                     params.nativeTokenSymbol,
                                     params.nativeTokenDecimals
                                 ),
-                                new UCS03ZkgmStakeImpl(handler)
+                                new UCS03ZkgmStakeImpl(handler),
+                                new UCS03ZkgmFungibleAssetOrderImpl(
+                                    params.weth,
+                                    zkgmERC20,
+                                    params.rateLimitEnabled
+                                )
                             )
                         ),
                         abi.encodeCall(UCS03Zkgm.initialize, (address(manager)))
@@ -1142,13 +1157,14 @@ contract GetDeployed is VersionedScript {
         string memory implUCS03Send = "implUCS03Send";
         implUCS03Send.serialize(
             "contract",
-            string("contracts/apps/ucs/03-zkgm/Zkgm.sol:UCS03ZkgmSendImpl")
+            string("contracts/apps/ucs/03-zkgm/Send.sol:UCS03ZkgmSendImpl")
         );
         implUCS03Send = implUCS03Send.serialize(
             "args",
             abi.encode(
                 handler,
                 weth,
+                zkgmERC20,
                 nativeTokenName,
                 nativeTokenSymbol,
                 nativeTokenDecimals
@@ -1161,11 +1177,25 @@ contract GetDeployed is VersionedScript {
         string memory implUCS03Stake = "implUCS03Stake";
         implUCS03Stake.serialize(
             "contract",
-            string("contracts/apps/ucs/03-zkgm/Zkgm.sol:UCS03ZkgmStakeImpl")
+            string("contracts/apps/ucs/03-zkgm/Stake.sol:UCS03ZkgmStakeImpl")
         );
         implUCS03Stake = implUCS03Stake.serialize("args", abi.encode(handler));
         impls.serialize(
             UCS03Zkgm(payable(ucs03)).STAKE_IMPL().toHexString(), implUCS03Stake
+        );
+
+        string memory implUCS03FAO = "implUCS03FAO";
+        implUCS03FAO.serialize(
+            "contract",
+            string(
+                "contracts/apps/ucs/03-zkgm/FungibleAssetOrder.sol:UCS03ZkgmFungibleAssetOrderImpl"
+            )
+        );
+        implUCS03FAO = implUCS03FAO.serialize(
+            "args", abi.encode(weth, zkgmERC20, rateLimitEnabled)
+        );
+        impls.serialize(
+            UCS03Zkgm(payable(ucs03)).FAO_IMPL().toHexString(), implUCS03FAO
         );
 
         string memory implUCS03 = "implUCS03";
@@ -1176,11 +1206,9 @@ contract GetDeployed is VersionedScript {
             "args",
             abi.encode(
                 handler,
-                weth,
-                zkgmERC20,
-                rateLimitEnabled,
                 UCS03Zkgm(payable(ucs03)).SEND_IMPL(),
-                UCS03Zkgm(payable(ucs03)).STAKE_IMPL()
+                UCS03Zkgm(payable(ucs03)).STAKE_IMPL(),
+                UCS03Zkgm(payable(ucs03)).FAO_IMPL()
             )
         );
         impls = impls.serialize(implOf(ucs03).toHexString(), implUCS03);
@@ -1230,17 +1258,18 @@ contract DryUpgradeUCS03 is VersionedScript {
         address newImplementation = address(
             new UCS03Zkgm(
                 handler,
-                weth,
-                zkgmERC20,
-                rateLimitEnabled,
                 new UCS03ZkgmSendImpl(
                     handler,
                     weth,
+                    zkgmERC20,
                     nativeTokenName,
                     nativeTokenSymbol,
                     nativeTokenDecimals
                 ),
-                new UCS03ZkgmStakeImpl(handler)
+                new UCS03ZkgmStakeImpl(handler),
+                new UCS03ZkgmFungibleAssetOrderImpl(
+                    weth, zkgmERC20, rateLimitEnabled
+                )
             )
         );
 
@@ -1291,17 +1320,18 @@ contract UpgradeUCS03 is VersionedScript {
         address newImplementation = address(
             new UCS03Zkgm(
                 handler,
-                weth,
-                zkgmERC20,
-                rateLimitEnabled,
                 new UCS03ZkgmSendImpl(
                     handler,
                     weth,
+                    zkgmERC20,
                     nativeTokenName,
                     nativeTokenSymbol,
                     nativeTokenDecimals
                 ),
-                new UCS03ZkgmStakeImpl(handler)
+                new UCS03ZkgmStakeImpl(handler),
+                new UCS03ZkgmFungibleAssetOrderImpl(
+                    weth, zkgmERC20, rateLimitEnabled
+                )
             )
         );
         ucs03.upgradeToAndCall(newImplementation, new bytes(0));
@@ -1541,20 +1571,11 @@ contract UpgradeStateLensIcs23Ics23Client is VersionedScript {
     address immutable deployer;
     address immutable sender;
     uint256 immutable privateKey;
-    uint32[] public clientIds;
 
     constructor() {
         deployer = vm.envAddress("DEPLOYER");
         sender = vm.envAddress("SENDER");
         privateKey = vm.envUint("PRIVATE_KEY");
-
-        // uint256[] memory u256ClientIds = vm.envUint("CLIENT_IDS", ",");
-
-        // clientIds = new uint32[](u256ClientIds.length);
-
-        // for (uint256 i = 0; i < u256ClientIds.length; ++i) {
-        //     clientIds[i] = uint32(u256ClientIds[i]);
-        // }
     }
 
     function getDeployed(
@@ -1587,10 +1608,6 @@ contract UpgradeStateLensIcs23Ics23Client is VersionedScript {
         stateLensIcs23Ics23Client.upgradeToAndCall(
             newImplementation, new bytes(0)
         );
-        // abi.encodeWithSelector(
-        //     StateLensIcs23Ics23Client.migrateClientStateToV1.selector,
-        //     clientIds
-        // )
 
         vm.stopBroadcast();
     }
@@ -1713,5 +1730,91 @@ contract DeployRoles is UnionScript {
         vm.startBroadcast(privateKey);
         setupRoles(owner, getContracts());
         vm.stopBroadcast();
+    }
+}
+
+contract DeployU is UnionScript, VersionedScript {
+    using LibString for *;
+
+    address immutable deployer;
+    address immutable sender;
+
+    constructor() {
+        deployer = vm.envAddress("DEPLOYER");
+        sender = vm.envAddress("SENDER");
+    }
+
+    function getDeployer() internal view override returns (Deployer) {
+        return Deployer(deployer);
+    }
+
+    function run() public {
+        uint256 privateKey = vm.envUint("PRIVATE_KEY");
+
+        vm.startBroadcast(privateKey);
+        U u = deployU();
+        vm.stopBroadcast();
+
+        console.log("U: ", address(u));
+    }
+}
+
+contract MintU is UnionScript, VersionedScript {
+    using LibString for *;
+    using LibBytes for *;
+
+    address immutable deployer;
+    address immutable sender;
+    uint256 immutable path;
+    uint32 immutable channelId;
+    bytes token;
+    bytes salt;
+
+    constructor() {
+        deployer = vm.envAddress("DEPLOYER");
+        sender = vm.envAddress("SENDER");
+        path = vm.envUint("FORWARD_PATH");
+        token = vm.envBytes("TOKEN");
+        channelId = uint32(vm.envUint("CHANNEL_ID"));
+        salt = vm.envBytes("SALT");
+    }
+
+    function getDeployer() internal view override returns (Deployer) {
+        return Deployer(deployer);
+    }
+
+    function getDeployed(
+        string memory salt
+    ) internal view returns (address) {
+        return CREATE3.predictDeterministicAddress(
+            keccak256(abi.encodePacked(sender.toHexString(), "/", salt)),
+            deployer
+        );
+    }
+
+    function run() public {
+        vm.pauseGasMetering();
+        address auth = getDeployed(IBC_SALT.MANAGER);
+        address zkgm = getDeployed(Protocols.UCS03);
+        address impl = getDeployed(LIB_SALT.U_IMPL);
+        console.log(auth);
+        console.log(zkgm);
+        console.log(impl);
+        FungibleAssetMetadata memory metadata = FungibleAssetMetadata({
+            implementation: abi.encodePacked(impl),
+            initializer: abi.encodeCall(
+                U.initialize, (auth, zkgm, "Union", "U", 18, salt)
+            )
+        });
+        bytes32 metadataImage =
+            EfficientHashLib.hash(ZkgmLib.encodeFungibleAssetMetadata(metadata));
+        bytes32 wrappedTokenSalt = EfficientHashLib.hash(
+            abi.encode(path, channelId, token, metadataImage)
+        );
+        address wrappedToken =
+            CREATE3.predictDeterministicAddress(wrappedTokenSalt, zkgm);
+        bytes memory wrappedTokenBytes = abi.encodePacked(wrappedToken);
+        console.logBytes(salt);
+        console.log(wrappedToken);
     }
 }

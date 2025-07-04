@@ -6,7 +6,7 @@ use ibc_union_spec::{query::PacketsByBatchHash, IbcUnion};
 use jsonrpsee::{core::RpcResult, types::ErrorObject};
 use macros::model;
 use serde_json::json;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 use unionlabs::{ibc::core::client::height::Height, primitives::Bytes};
 use voyager_sdk::{
     message::{
@@ -79,7 +79,10 @@ where
             .map(|e| e.provable_height)
             .reduce(|acc, elem| match (elem, acc) {
                 (EventProvableHeight::Min(elem), EventProvableHeight::Min(acc)) => {
-                    EventProvableHeight::Min(elem.min(acc))
+                    // the min target height of a batch of `Min` events is the highest min height
+                    // given the batch [10, 11, 12]
+                    // the min height that all events are provable at is 12
+                    EventProvableHeight::Min(elem.max(acc))
                 }
                 (EventProvableHeight::Exactly(elem), EventProvableHeight::Exactly(acc)) => {
                     assert_eq!(elem, acc, "multiple exact heights in the batch");
@@ -145,7 +148,18 @@ where
                             chain_id: client_state_meta.counterparty_chain_id,
                             client_id: RawClientId::new(self.client_id.clone()),
                             update_from: client_state_meta.counterparty_height,
-                            update_to: latest_height,
+                            update_to: if latest_height.height() < target_height.height() {
+                                warn!(
+                                    "latest height {latest_height} is less than the target \
+                                     height {target_height}, there may be something wrong \
+                                     with the rpc for {} - client {} will be updated to the \
+                                     target height instead of the latest height",
+                                    module.chain_id, self.client_id
+                                );
+                                target_height
+                            } else {
+                                latest_height
+                            },
                         })],
                         [],
                         PluginMessage::new(

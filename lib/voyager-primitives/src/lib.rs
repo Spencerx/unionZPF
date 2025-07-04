@@ -123,20 +123,20 @@ impl ClientType {
     pub const ETHERMINT: &'static str = "ethermint";
 
     /// A client tracking an EVM-compatible chain utilizing [MPT] as the storage layer, verified
-    /// through that chain's consensus as settled on an intermediary [ICS-23] chain.
+    /// through that chain's consensus as settled on an intermediary [ICS23] chain.
     ///
     /// [MPT]: https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie
-    /// [ICS-23]: https://github.com/cosmos/ics23
+    /// [ICS23]: https://github.com/cosmos/ics23
     pub const STATE_LENS_ICS23_MPT: &'static str = "state-lens/ics23/mpt";
 
-    /// A client tracking an [ICS-23] chain, verified through that chain's consensus as
-    /// settled on an intermediary [ICS-23] chain.
+    /// A client tracking an [ICS23] chain, verified through that chain's consensus as
+    /// settled on an intermediary [ICS23] chain.
     ///
     /// [ICS23]: https://github.com/cosmos/ics23
     pub const STATE_LENS_ICS23_ICS23: &'static str = "state-lens/ics23/ics23";
 
     /// A client tracking an [Aptos] chain, verified through that chain's consensus as
-    /// settled on an intermediary [ICS-23] chain.
+    /// settled on an intermediary [ICS23] chain.
     ///
     /// [ICS23]: https://github.com/cosmos/ics23
     /// [Aptos]: https://github.com/aptos-labs/aptos-core
@@ -154,7 +154,20 @@ impl ClientType {
     /// [Bob]: https://github.com/ethereum-optimism/optimism/blob/v1.7.2/packages/contracts-bedrock/src/L1/L2OutputOracle.sol
     pub const BOB: &'static str = "bob";
 
+    /// A client tracking the state of the [Base] optimistic L2, settling on
+    /// Ethereum, verified by verifying the L2 settlement on the L1.
+    ///
+    /// [Base]: https://www.base.org
+    /// [L2 settlement]: https://github.com/base/contracts
+    pub const BASE: &'static str = "base";
+
     pub const SUI: &'static str = "sui";
+
+    /// A client tracking the state of a chain with [Parlia] consensus, verified by verifying the [fast finality].
+    ///
+    /// [Parlia]: https://docs.bnbchain.org/bc-fusion/validators/staking
+    /// [fast finality]: https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/bsc-api-list/#economic-finality-fast-finality
+    pub const PARLIA: &'static str = "parlia";
 
     // lots more to come - near, linea, polygon - stay tuned
 }
@@ -215,6 +228,18 @@ impl ConsensusType {
 
     // TODO(aeryz): docs
     pub const SUI: &'static str = "sui";
+
+    /// [Parlia] consensus, as used by [BSC].
+    ///
+    /// [Parlia]: https://docs.bnbchain.org/bc-fusion/validators/staking
+    /// [BSC]: https://bnbchain.org
+    pub const PARLIA: &'static str = "parlia";
+
+    /// [Base] optimistic L2, settling on Ethereum with a custom OP stack settlement.
+    ///
+    /// [Base]: https://www.base.org
+    /// [custom OP stack]: https://github.com/base/contracts
+    pub const BASE: &'static str = "base";
 
     // lots more to come - near, linea, polygon - stay tuned
 }

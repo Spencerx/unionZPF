@@ -2,11 +2,13 @@ pragma solidity ^0.8.27;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import "solady/utils/LibBit.sol";
 import "solady/utils/LibString.sol";
 import "solady/utils/LibBytes.sol";
 import "solady/utils/EfficientHashLib.sol";
 import "./IZkgm.sol";
+import "./ISolver.sol";
 
 library ZkgmLib {
     using LibBytes for *;
@@ -24,18 +26,27 @@ library ZkgmLib {
     uint256 public constant FILL_TYPE_PROTOCOL = 0xB0CAD0;
     uint256 public constant FILL_TYPE_MARKETMAKER = 0xD1CEC45E;
 
+    uint8 public constant FUNGIBLE_ASSET_METADATA_TYPE_IMAGE = 0x00;
+    uint8 public constant FUNGIBLE_ASSET_METADATA_TYPE_PREIMAGE = 0x01;
+    uint8 public constant FUNGIBLE_ASSET_METADATA_TYPE_IMAGE_UNWRAP = 0x02;
+
+    bytes32 public constant FUNGIBLE_ASSET_METADATA_IMAGE_PREDICT_V1 =
+        0xC0DEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE;
+
     // Public instructions
     uint8 public constant OP_FORWARD = 0x00;
     uint8 public constant OP_MULTIPLEX = 0x01;
     uint8 public constant OP_BATCH = 0x02;
     uint8 public constant OP_FUNGIBLE_ASSET_ORDER = 0x03;
 
-    uint8 public constant OP_STAKE = 0xC1;
-    uint8 public constant OP_UNSTAKE = 0xC2;
-    uint8 public constant OP_WITHDRAW_STAKE = 0xC3;
+    uint8 public constant OP_STAKE = 0x04;
+    uint8 public constant OP_UNSTAKE = 0x05;
+    uint8 public constant OP_WITHDRAW_STAKE = 0x06;
+    uint8 public constant OP_WITHDRAW_REWARDS = 0x07;
 
     uint8 public constant INSTR_VERSION_0 = 0x00;
     uint8 public constant INSTR_VERSION_1 = 0x01;
+    uint8 public constant INSTR_VERSION_2 = 0x02;
 
     bytes32 public constant FORWARD_SALT_MAGIC =
         0xC0DE00000000000000000000000000000000000000000000000000000000BABE;
@@ -46,7 +57,6 @@ library ZkgmLib {
     string public constant IBC_VERSION_STR = "ucs03-zkgm-0";
     bytes32 public constant IBC_VERSION = keccak256(bytes(IBC_VERSION_STR));
 
-    error ErrUnsupportedVersion();
     error ErrAsyncMultiplexUnsupported();
     error ErrBatchMustBeSync();
     error ErrUnknownOpcode();
@@ -57,6 +67,7 @@ library ZkgmLib {
     error ErrInvalidFillType();
     error ErrInvalidIBCVersion();
     error ErrInvalidHops();
+    error ErrUnwrapBaseAmountSmallerThanQuoteAmount();
     error ErrInvalidAssetOrigin();
     error ErrInvalidAssetSymbol();
     error ErrInvalidAssetDecimals();
@@ -81,11 +92,27 @@ library ZkgmLib {
     error ErrInvalidStakeChannelId();
     error ErrInvalidStakeAmount();
     error ErrInvalidStakeValidator();
+    error ErrCannotDeploy();
+    error ErrInvalidMetadataType();
+    error ErrInvalidMetadataImage();
+    error ErrMustBeUnwrap();
+    error ErrMustBeWrap();
+    error ErrStakingRewardNotWithdrawable();
 
     function encodeFungibleAssetOrderAck(
         FungibleAssetOrderAck memory ack
     ) internal pure returns (bytes memory) {
         return abi.encode(ack.fillType, ack.marketMaker);
+    }
+
+    function decodeFungibleAssetMetadata(
+        bytes calldata stream
+    ) internal pure returns (FungibleAssetMetadata calldata) {
+        FungibleAssetMetadata calldata meta;
+        assembly {
+            meta := stream.offset
+        }
+        return meta;
     }
 
     function decodeUnstakeAck(
@@ -102,6 +129,16 @@ library ZkgmLib {
         bytes calldata stream
     ) internal pure returns (WithdrawStakeAck calldata) {
         WithdrawStakeAck calldata ack;
+        assembly {
+            ack := stream.offset
+        }
+        return ack;
+    }
+
+    function decodeWithdrawRewardsAck(
+        bytes calldata stream
+    ) internal pure returns (WithdrawRewardsAck calldata) {
+        WithdrawRewardsAck calldata ack;
         assembly {
             ack := stream.offset
         }
@@ -205,6 +242,7 @@ library ZkgmLib {
         return abi.encode(
             stake.tokenId,
             stake.governanceToken,
+            stake.governanceTokenMetadataImage,
             stake.sender,
             stake.beneficiary,
             stake.validator,
@@ -218,9 +256,9 @@ library ZkgmLib {
         return abi.encode(
             unstake.tokenId,
             unstake.governanceToken,
+            unstake.governanceTokenMetadataImage,
             unstake.sender,
-            unstake.validator,
-            unstake.amount
+            unstake.validator
         );
     }
 
@@ -230,8 +268,28 @@ library ZkgmLib {
         return abi.encode(
             withdrawStake.tokenId,
             withdrawStake.governanceToken,
+            withdrawStake.governanceTokenMetadataImage,
             withdrawStake.sender,
             withdrawStake.beneficiary
+        );
+    }
+
+    function encodeWithdrawStakeAck(
+        WithdrawStakeAck memory withdrawStakeAck
+    ) internal pure returns (bytes memory) {
+        return abi.encode(withdrawStakeAck.amount);
+    }
+
+    function encodeWithdrawRewards(
+        WithdrawRewards memory withdrawRewards
+    ) internal pure returns (bytes memory) {
+        return abi.encode(
+            withdrawRewards.tokenId,
+            withdrawRewards.governanceToken,
+            withdrawRewards.governanceTokenMetadataImage,
+            withdrawRewards.validator,
+            withdrawRewards.sender,
+            withdrawRewards.beneficiary
         );
     }
 
@@ -296,6 +354,16 @@ library ZkgmLib {
         return operand;
     }
 
+    function decodeWithdrawRewards(
+        bytes calldata stream
+    ) internal pure returns (WithdrawRewards calldata) {
+        WithdrawRewards calldata operand;
+        assembly {
+            operand := stream.offset
+        }
+        return operand;
+    }
+
     function encodeFungibleAssetOrder(
         FungibleAssetOrder memory order
     ) internal pure returns (bytes memory) {
@@ -313,10 +381,41 @@ library ZkgmLib {
         );
     }
 
+    function encodeFungibleAssetOrderV2(
+        FungibleAssetOrderV2 memory order
+    ) internal pure returns (bytes memory) {
+        return abi.encode(
+            order.sender,
+            order.receiver,
+            order.baseToken,
+            order.baseAmount,
+            order.metadataType,
+            order.metadata,
+            order.quoteToken,
+            order.quoteAmount
+        );
+    }
+
+    function encodeFungibleAssetMetadata(
+        FungibleAssetMetadata memory meta
+    ) internal pure returns (bytes memory) {
+        return abi.encode(meta.implementation, meta.initializer);
+    }
+
     function decodeFungibleAssetOrder(
         bytes calldata stream
     ) internal pure returns (FungibleAssetOrder calldata) {
         FungibleAssetOrder calldata operand;
+        assembly {
+            operand := stream.offset
+        }
+        return operand;
+    }
+
+    function decodeFungibleAssetOrderV2(
+        bytes calldata stream
+    ) internal pure returns (FungibleAssetOrderV2 calldata) {
+        FungibleAssetOrderV2 calldata operand;
         assembly {
             operand := stream.offset
         }
@@ -516,12 +615,12 @@ library ZkgmLib {
         uint8 opcode,
         uint8 version
     ) internal pure returns (bool) {
-        if (instruction.opcode != opcode) {
-            return false;
-        }
-        if (instruction.version != version) {
-            revert ErrUnsupportedVersion();
-        }
-        return true;
+        return instruction.opcode == opcode && instruction.version == version;
+    }
+
+    function isSolver(
+        address token
+    ) internal view returns (bool) {
+        return ERC165Checker.supportsInterface(token, type(ISolver).interfaceId);
     }
 }

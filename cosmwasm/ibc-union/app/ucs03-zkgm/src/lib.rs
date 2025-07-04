@@ -73,8 +73,6 @@ pub enum ContractError {
         "the multiplex target contract address can't be validated, make sure the bech prefix matches the current chain"
     )]
     UnableToValidateMultiplexTarget,
-    #[error("feature is not yet implemented")]
-    Unimplemented,
     #[error("contract creation event not found during handling `reply`")]
     ContractCreationEventNotFound,
     #[error("{0:?}")]
@@ -118,6 +116,16 @@ pub enum ContractError {
     InvalidMultiplexSender,
     #[error("async acknowledgements are not allowed in batches as they are atomic")]
     BatchMustBeSync,
+    #[error("base amount must be greater or equal than quote amount when unwrapping")]
+    BaseAmountLessThanQuoteAmount,
+    #[error("invalid metadata type")]
+    InvalidMetadataType,
+    #[error("invalid metadata image")]
+    InvalidMetadataImage,
+    #[error("must be unwrap operation")]
+    MustBeUnwrap,
+    #[error("must be wrap operation")]
+    MustBeWrap,
     #[error("token bucket is absent for {token}")]
     TokenBucketIsAbsent { token: String },
     #[error(transparent)]
@@ -138,4 +146,6 @@ pub enum ContractError {
     InvalidGovernanceToken,
     #[error("staking position must be unique but found an already deployed staking account")]
     StakingAccountAlreadyExist { stake: Box<Stake>, account: Addr },
+    #[error("you tried to transfer a token that was not previously bridged using the image of the metadata")]
+    WrappedTokenNotDeployed,
 }

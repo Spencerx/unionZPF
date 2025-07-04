@@ -1,5 +1,4 @@
 <script lang="ts">
-import { ucs03ZkgmAbi } from "$lib/abi/ucs03.ts"
 import ChainComponent from "$lib/components/model/ChainComponent.svelte"
 import ErrorComponent from "$lib/components/model/ErrorComponent.svelte"
 import InsetError from "$lib/components/model/InsetError.svelte"
@@ -28,6 +27,7 @@ import type { SubmitInstruction } from "$lib/transfer/normal/steps/steps.ts"
 import * as WriteCosmos from "$lib/transfer/shared/services/write-cosmos.ts"
 import * as WriteEvm from "$lib/transfer/shared/services/write-evm.ts"
 import { isValidBech32ContractAddress } from "$lib/utils"
+import { GAS_DENOMS } from "@unionlabs/sdk/constants/gas-denoms"
 import type { ExecuteContractError } from "@unionlabs/sdk/cosmos"
 import {
   createViemPublicClient,
@@ -36,6 +36,7 @@ import {
   CreateViemWalletClientError,
   WriteContractError,
 } from "@unionlabs/sdk/evm"
+import { ucs03abi } from "@unionlabs/sdk/evm/abi"
 import { instructionAbi } from "@unionlabs/sdk/evm/abi"
 import type {
   CosmosAddressEncodeError,
@@ -165,7 +166,7 @@ export const submit = Effect.gen(function*() {
           chain: viemChain,
           account: connectorClient.account,
           address: step.intent.channel.source_port_id,
-          abi: ucs03ZkgmAbi,
+          abi: ucs03abi,
           functionName: "send",
           args: [
             step.intent.channel.source_channel_id,
@@ -178,6 +179,7 @@ export const submit = Effect.gen(function*() {
               operand: encodeAbi(step.instruction),
             },
           ],
+          ...(Option.isSome(step.native) ? { value: step.native.value.amount } : {}),
         })
       ),
       setEts,
@@ -225,11 +227,11 @@ export const submit = Effect.gen(function*() {
               ]),
             },
           },
-          isNative
+          Option.isSome(step.native)
             ? [
               {
-                denom: baseToken,
-                amount: step.intent.baseAmount.toString(),
+                denom: step.native.value.baseToken,
+                amount: step.native.value.amount.toString(),
               },
             ]
             : undefined,
@@ -301,11 +303,13 @@ const handleSubmit = () => {
     <div class="flex-1 flex flex-col gap-4">
       <h3 class="text-lg font-semibold">Submit Transfer</h3>
       <section>
-        <Label>From</Label> <ChainComponent chain={step.intent.sourceChain} />
+        <Label>From</Label>
+        <ChainComponent chain={step.intent.sourceChain} />
       </section>
 
       <section>
-        <Label>To</Label> <ChainComponent chain={step.intent.destinationChain} />
+        <Label>To</Label>
+        <ChainComponent chain={step.intent.destinationChain} />
       </section>
       <p class="text-sm text-zinc-400">
         This will initiate the transfer on

@@ -25,7 +25,6 @@ use tracing::{info, instrument};
 use tracing_subscriber::EnvFilter;
 use ucs03_zkgm::msg::TokenMinterInitParams;
 use unionlabs::{
-    bech32::Bech32,
     cosmos::{bank::msg_send::MsgSend, base::coin::Coin},
     cosmwasm::wasm::{
         access_config::AccessConfig, msg_execute_contract::MsgExecuteContract,
@@ -35,7 +34,7 @@ use unionlabs::{
         msg_update_instantiate_config::MsgUpdateInstantiateConfig,
     },
     google::protobuf::any::Any,
-    primitives::{Bytes, H256},
+    primitives::{Bech32, Bytes, H256},
     signer::CosmosSigner,
 };
 
@@ -344,7 +343,7 @@ struct AppPaths {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub struct Ucs03Config {
     path: PathBuf,
     token_minter_path: PathBuf,

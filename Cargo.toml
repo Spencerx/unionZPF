@@ -57,6 +57,7 @@ members = [
   "lib/galois-rpc",
   "lib/cosmos-sdk-event",
   "lib/frissitheto",
+  "lib/parlia-types",
 
 
   # "lib/near/near-ibc",
@@ -66,15 +67,18 @@ members = [
 
   "lib/ibc-solidity",
 
+  "lib/base-verifier",
   "lib/bob-verifier",
   "lib/arbitrum-verifier",
   "lib/cometbls-groth16-verifier",
   "lib/ethereum-sync-protocol",
   "lib/ethereum-sync-protocol-types",
   "lib/evm-storage-verifier",
+  "lib/parlia-verifier",
   "lib/scroll-verifier",
   "lib/tendermint-verifier",
 
+  "lib/base-light-client-types",
   "lib/bob-light-client-types",
   "lib/arbitrum-light-client-types",
   "lib/berachain-light-client-types",
@@ -83,6 +87,7 @@ members = [
   "lib/ethereum-light-client-types",
   "lib/ethermint-light-client-types",
   "lib/movement-light-client-types",
+  "lib/parlia-light-client-types",
   "lib/trusted-mpt-light-client-types",
   "lib/linea-light-client-types",
   "lib/scroll-light-client-types",
@@ -94,6 +99,7 @@ members = [
   "cosmwasm/deployer",
 
   "cosmwasm/ibc-union/lightclient/arbitrum",
+  "cosmwasm/ibc-union/lightclient/base",
   "cosmwasm/ibc-union/lightclient/berachain",
   "cosmwasm/ibc-union/lightclient/bob",
   "cosmwasm/ibc-union/lightclient/cometbls",
@@ -101,6 +107,7 @@ members = [
   "cosmwasm/ibc-union/lightclient/ethermint",
   "cosmwasm/ibc-union/lightclient/tendermint",
   # "cosmwasm/ibc-union/lightclient/movement",
+  "cosmwasm/ibc-union/lightclient/parlia",
   "cosmwasm/ibc-union/lightclient/trusted-mpt",
   "cosmwasm/ibc-union/lightclient/state-lens-ics23-mpt",
   # "cosmwasm/ibc-union/lightclient/state-lens-ics23-smt",
@@ -143,11 +150,13 @@ members = [
   # "voyager/modules/proof/movement",
   "voyager/modules/proof/sui",
 
+  "voyager/modules/client/base",
   "voyager/modules/client/bob",
   "voyager/modules/client/arbitrum",
   "voyager/modules/client/cometbls",
   "voyager/modules/client/ethereum",
   # "voyager/modules/client/movement",
+  "voyager/modules/client/parlia",
   "voyager/modules/client/tendermint",
   "voyager/modules/client/ethermint",
   "voyager/modules/client/state-lens/ics23-mpt",
@@ -156,11 +165,13 @@ members = [
   "voyager/modules/client/sui",
   "voyager/modules/client/trusted-mpt",
 
+  "voyager/modules/client-bootstrap/base",
   "voyager/modules/client-bootstrap/bob",
   "voyager/modules/client-bootstrap/arbitrum",
   "voyager/modules/client-bootstrap/cometbls",
   "voyager/modules/client-bootstrap/ethereum",
   # "voyager/modules/client-bootstrap/movement",
+  "voyager/modules/client-bootstrap/parlia",
   "voyager/modules/client-bootstrap/tendermint",
   "voyager/modules/client-bootstrap/ethermint",
   "voyager/modules/client-bootstrap/trusted-mpt",
@@ -169,22 +180,26 @@ members = [
   "voyager/modules/client-bootstrap/state-lens/ics23-ics23",
   "voyager/modules/client-bootstrap/sui",
 
+  "voyager/modules/finality/base",
   "voyager/modules/finality/bob",
   "voyager/modules/finality/arbitrum",
   "voyager/modules/finality/berachain",
   "voyager/modules/finality/cometbls",
   "voyager/modules/finality/ethereum",
   # "voyager/modules/finality/movement",
+  "voyager/modules/finality/parlia",
   "voyager/modules/finality/tendermint",
   "voyager/modules/finality/trusted-evm",
   "voyager/modules/finality/sui",
 
+  # "voyager/plugins/client-update/base",
   "voyager/plugins/client-update/bob",
   "voyager/plugins/client-update/arbitrum",
   "voyager/plugins/client-update/berachain",
   "voyager/plugins/client-update/cometbls",
   "voyager/plugins/client-update/ethereum",
   # "voyager/plugins/client-update/movement",
+  "voyager/plugins/client-update/parlia",
   "voyager/plugins/client-update/tendermint",
   "voyager/plugins/client-update/ethermint",
   "voyager/plugins/client-update/state-lens",
@@ -243,6 +258,7 @@ members = [
   "lib/embed-commit/verifier",
 
   "lib/ucs04",
+  "lib/deployments",
 
   "lib/consensus-primitives",
   "lib/solidity-slot",
@@ -256,6 +272,7 @@ members = [
   "lib/voyager-plugin-protocol",
   "lib/wasm-client-type",
   "lib/sui-verifier",
+  "tools/update-deployments",
 ]
 
 [workspace.package]
@@ -305,6 +322,13 @@ state-lens-light-client-types = { path = "lib/state-lens-light-client-types", de
 sui-light-client-types        = { path = "lib/sui-light-client-types", default-features = false }
 sui-sdk                       = { git = "https://github.com/mystenlabs/sui", default-features = false }
 sui-verifier                  = { path = "lib/sui-verifier", default-features = false }
+
+parlia-light-client-types = { path = "lib/parlia-light-client-types", default-features = false }
+parlia-types              = { path = "lib/parlia-types", default-features = false }
+parlia-verifier           = { path = "lib/parlia-verifier", default-features = false }
+
+base-light-client-types = { path = "lib/base-light-client-types", default-features = false }
+base-verifier           = { path = "lib/base-verifier", default-features = false }
 
 bob-light-client-types = { path = "lib/bob-light-client-types", default-features = false }
 bob-verifier           = { path = "lib/bob-verifier", default-features = false }
@@ -405,12 +429,15 @@ voyager-sdk             = { path = "lib/voyager-sdk", default-features = false }
 voyager-types           = { path = "lib/voyager-types", default-features = false }
 voyager-vm              = { path = "lib/voyager-vm", default-features = false }
 
-embed-commit = { path = "lib/embed-commit", default-features = false }
+embed-commit          = { path = "lib/embed-commit", default-features = false }
+embed-commit-verifier = { path = "lib/embed-commit/verifier", default-features = false }
 
 consensus-primitives = { path = "lib/consensus-primitives", default-features = false }
 
 state-lens-ics23-mpt-light-client = { path = "cosmwasm/ibc-union/lightclient/state-lens-ics23-mpt", default-features = false }
 
+create3          = { path = "lib/create3", default-features = false }
+deployments      = { path = "lib/deployments", default-features = false }
 solidity-slot    = { path = "lib/solidity-slot", default-features = false }
 ucs04            = { path = "lib/ucs04", default-features = false }
 wasm-client-type = { path = "lib/wasm-client-type", default-features = false }

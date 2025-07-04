@@ -33,6 +33,7 @@ use jsonrpsee::{
         client::{BatchResponse, ClientT},
         params::BatchRequestBuilder,
         traits::ToRpcParams,
+        TEN_MB_SIZE_BYTES,
     },
     server::middleware::rpc::RpcServiceT,
     types::{ErrorObject, Response, ResponsePayload},
@@ -46,6 +47,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::value::RawValue;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
+use tower::Layer;
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace, Instrument};
 use unionlabs::{ethereum::slot::keccak256, primitives::encoding::HexUnprefixed, ErrorReporter};
 use voyager_client::VoyagerClient;
@@ -61,12 +63,27 @@ pub const STARTUP_ERROR_EXIT_CODE: u8 = 14;
 pub async fn coordinator_server(
     name: &str,
     server: impl VoyagerRpcServer,
+    layer: impl Layer<
+            RpcService,
+            Service: Clone
+                         + Send
+                         + Sync
+                         + 'static
+                         + RpcServiceT<MethodResponse = jsonrpsee::MethodResponse>,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
 ) -> anyhow::Result<impl Future<Output = ()>> {
     let coordinator_socket = coordinator_socket_path(name);
+
     let rpc_server = reth_ipc::server::Builder::default()
+        .max_request_body_size(TEN_MB_SIZE_BYTES * 10)
+        .max_response_body_size(TEN_MB_SIZE_BYTES * 10)
         .set_rpc_middleware(
             reth_ipc::server::RpcServiceBuilder::new()
-                .layer_fn(|service| ExtractItemIdService { service }),
+                .layer(ExtractItemIdServiceLayer)
+                .layer(layer),
         )
         .build(coordinator_socket.clone());
 
@@ -76,7 +93,7 @@ pub async fn coordinator_server(
 
     Ok(server
         .stopped()
-        .instrument(debug_span!("module_rpc_server", %name)))
+        .instrument(debug_span!("coordinator_server", %name)))
 }
 
 /// Run the worker server.
@@ -112,6 +129,8 @@ pub async fn worker_server<T>(
     trace!("connected to voyager socket");
 
     let ipc_server = reth_ipc::server::Builder::default()
+        .max_request_body_size(TEN_MB_SIZE_BYTES * 10)
+        .max_response_body_size(TEN_MB_SIZE_BYTES * 10)
         .set_rpc_middleware(
             RpcServiceBuilder::new()
                 .layer_fn(move |service| ExtractItemIdService { service })
@@ -241,6 +260,17 @@ pub fn coordinator_socket_path(name: &str) -> String {
 #[derive(Clone)]
 pub struct ExtractItemIdService<S> {
     service: S,
+}
+
+#[derive(Clone)]
+pub struct ExtractItemIdServiceLayer;
+
+impl<S> Layer<S> for ExtractItemIdServiceLayer {
+    type Service = ExtractItemIdService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ExtractItemIdService { service: inner }
+    }
 }
 
 impl<S> RpcServiceT for ExtractItemIdService<S>
