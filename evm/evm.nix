@@ -18,15 +18,8 @@ _: {
       # gitRevToUse = "";
 
       getDeployment =
-        let
-          json = builtins.fromJSON (builtins.readFile ../deployments/deployments.json);
-        in
-        chainId:
-        (pkgs.lib.lists.findSingle (deployment: deployment.chain_id == chainId)
-          (throw "deployment for ${chainId} not found")
-          (throw "many deployments for ${chainId} found")
-          json
-        ).deployments;
+        ucs04-chain-id:
+        (builtins.fromJSON (builtins.readFile ../deployments/deployments.json)).${ucs04-chain-id};
 
       solidity-stringutils = pkgs.fetchFromGitHub {
         owner = "Arachnid";
@@ -198,6 +191,7 @@ _: {
 
       # name                  : plaintext name of network
       # chain-id              : chain id of the network
+      # ucs04-chain-id        : ucs04 chain id of the network
       # rpc-url               : rpc url for this network, should support full eth_getLogs (for fetching the
       #                         deployment heights)
       # private-key           : bash expression that evaluates to the private key to use for deployments
@@ -254,9 +248,10 @@ _: {
         # testnets
         rec {
           chain-id = "11155111";
+          ucs04-chain-id = "ethereum.11155111";
 
           name = "sepolia";
-          rpc-url = "https://eth-sepolia.g.alchemy.com/v2/daqIOE3zftkyQP_TKtb8XchSMCtc1_6D";
+          rpc-url = "https://sepolia.gateway.tenderly.co";
           private-key = ''"$(op item get deployer --vault union-testnet-10 --field evm-private-key --reveal)"'';
           weth = "0x7b79995e5f793a07bc00c21412e50ecae098e7f9";
           rate-limit-enabled = "false";
@@ -271,6 +266,7 @@ _: {
         }
         rec {
           chain-id = "17000";
+          ucs04-chain-id = "ethereum.17000";
 
           name = "holesky";
           rpc-url = "https://holesky.gateway.tenderly.co";
@@ -288,6 +284,7 @@ _: {
         }
         rec {
           chain-id = "21000001";
+          ucs04-chain-id = "corn.21000001";
 
           name = "corn-testnet";
           rpc-url = "https://testnet.corn-rpc.com";
@@ -304,6 +301,7 @@ _: {
         }
         rec {
           chain-id = "808813";
+          ucs04-chain-id = "bob.808813";
 
           name = "bob-sepolia";
           rpc-url = "https://bob-sepolia.rpc.gobob.xyz";
@@ -321,6 +319,7 @@ _: {
         }
         rec {
           chain-id = "80069";
+          ucs04-chain-id = "berachain.80069";
 
           name = "bepolia";
           rpc-url = "https://bepolia.rpc.berachain.com/";
@@ -337,6 +336,7 @@ _: {
         }
         rec {
           chain-id = "1328";
+          ucs04-chain-id = "sei.1328";
 
           name = "sei-atlantic";
           rpc-url = "https://evm-rpc-testnet.sei-apis.com";
@@ -346,6 +346,42 @@ _: {
 
           native-token-name = "Sei";
           native-token-symbol = "SEI";
+          native-token-decimals = 18;
+
+          verifier = "etherscan";
+          verification-key = ''"$(op item get tenderly --vault union-testnet-10 --field contract-verification-api-key --reveal)"'';
+          verifier-url = mkTenderlyVerifierUrl chain-id;
+        }
+        rec {
+          chain-id = "97";
+          ucs04-chain-id = "bsc.97";
+
+          name = "bsc-testnet";
+          rpc-url = "https://bsc-testnet.bnbchain.org";
+          private-key = ''"$(op item get deployer --vault union-testnet-10 --field evm-private-key --reveal)"'';
+          weth = "0xae13d989dac2f0debff460ac112a837c89baa7cd";
+          rate-limit-enabled = "false";
+
+          native-token-name = "BNB";
+          native-token-symbol = "BNB";
+          native-token-decimals = 18;
+
+          verifier = "etherscan";
+          verification-key = ''"$(op item get tenderly --vault union-testnet-10 --field contract-verification-api-key --reveal)"'';
+          verifier-url = mkTenderlyVerifierUrl chain-id;
+        }
+        rec {
+          chain-id = "84532";
+          ucs04-chain-id = "base.84532";
+
+          name = "base-sepolia";
+          rpc-url = "https://sepolia.base.org";
+          private-key = ''"$(op item get deployer --vault union-testnet-10 --field evm-private-key --reveal)"'';
+          weth = "0x4200000000000000000000000000000000000006";
+          rate-limit-enabled = "false";
+
+          native-token-name = "Ether";
+          native-token-symbol = "ETH";
           native-token-decimals = 18;
 
           verifier = "etherscan";
@@ -363,6 +399,7 @@ _: {
         # mainnets
         rec {
           chain-id = "1";
+          ucs04-chain-id = "ethereum.1";
 
           name = "ethereum";
           rpc-url = "https://eth-mainnet.g.alchemy.com/v2/MS7UF39itji9IWEiJBISExWgEGtEGbs7";
@@ -379,6 +416,7 @@ _: {
         }
         rec {
           chain-id = "60808";
+          ucs04-chain-id = "bob.60808";
 
           name = "bob";
           rpc-url = "https://rpc.gobob.xyz";
@@ -395,6 +433,7 @@ _: {
         }
         rec {
           chain-id = "21000000";
+          ucs04-chain-id = "corn.21000000";
 
           name = "corn";
           rpc-url = "https://mainnet.corn-rpc.com";
@@ -477,100 +516,26 @@ _: {
         '';
 
       update-deployments-json =
-        { rpc-url, name, ... }:
+        {
+          rpc-url,
+          ucs04-chain-id,
+          name,
+          ...
+        }:
         pkgs.writeShellApplication {
           name = "update-deployments-json-${name}";
           runtimeInputs = [
-            self'.packages.forge
-            pkgs.moreutils
+            self'.packages.update-deployments
           ];
-          runtimeEnv = {
-            ETH_RPC_URL = rpc-url;
-          };
           text = ''
             ${ensureAtRepositoryRoot}
 
-            DEPLOYMENTS_FILE="deployments/deployments.json"
-            export DEPLOYMENTS_FILE
-
-            CHAIN_ID="$(cast chain-id)"
-            export CHAIN_ID
-
-            echo "chain id: $CHAIN_ID"
-
-            for key in core multicall ; do
-              jq \
-                '. |= map(if .chain_id == $chain_id then .deployments[$key].height = ($height | tonumber) | .deployments[$key].commit = $commit else . end)' \
-                "$DEPLOYMENTS_FILE" \
-                --arg chain_id "$CHAIN_ID" \
-                --arg key "$key" \
-                --arg height "$(( "$(
-                  cast logs 'Initialized(uint64)' \
-                    --address "$(
-                          jq -r \
-                            '.[] | select(.chain_id == $chain_id) | .deployments[$key].address' \
-                            "$DEPLOYMENTS_FILE" \
-                            --arg chain_id "$CHAIN_ID" \
-                            --arg key "$key"
-                        )" \
-                    --json \
-                  | jq -r '.[0].blockNumber'
-                )" ))" \
-                --arg commit "$(
-                  cast call "$(
-                    jq -r \
-                      '.[] | select(.chain_id == $chain_id) | .deployments[$key].address' \
-                      "$DEPLOYMENTS_FILE" \
-                      --arg chain_id "$CHAIN_ID" \
-                      --arg key "$key"
-                  )" "gitRev()(string)" \
-                  | jq -r || echo unknown
-                )" \
-              | sponge "$DEPLOYMENTS_FILE"
-            done
-
-            for key in lightclient app ; do
-              echo "key: $key"
-              jq -r \
-                '.[] | select(.chain_id == $chain_id) | .deployments[$key] | keys[]' \
-                "$DEPLOYMENTS_FILE" \
-                --arg chain_id "$CHAIN_ID" \
-                --arg key "$key" \
-                | while read -r subkey ; do
-                  echo "$key: $subkey"
-                  jq \
-                    '. |= map(if .chain_id == $chain_id then .deployments[$key][$subkey].height = ($height | tonumber) | .deployments[$key][$subkey].commit = $commit else . end)' \
-                    "$DEPLOYMENTS_FILE" \
-                    --arg chain_id "$CHAIN_ID" \
-                    --arg subkey "$subkey" \
-                    --arg key "$key" \
-                    --arg height "$(( "$(
-                      cast logs 'Initialized(uint64)' \
-                        --address "$(
-                              jq -r \
-                                '.[] | select(.chain_id == $chain_id) | .deployments[$key][$subkey].address' \
-                                "$DEPLOYMENTS_FILE" \
-                                --arg chain_id "$CHAIN_ID" \
-                                --arg subkey "$subkey" \
-                                --arg key "$key"
-                            )" \
-                        --json \
-                      | jq -r '.[0].blockNumber'
-                    )" ))" \
-                    --arg commit "$(
-                      cast call "$(
-                        jq -r \
-                          '.[] | select(.chain_id == $chain_id) | .deployments[$key][$subkey].address' \
-                          "$DEPLOYMENTS_FILE" \
-                          --arg chain_id "$CHAIN_ID" \
-                          --arg subkey "$subkey" \
-                          --arg key "$key"
-                      )" "gitRev()(string)" \
-                      | jq -r || echo unknown
-                    )" \
-                  | sponge "$DEPLOYMENTS_FILE"
-                done
-            done
+            RUST_LOG=info update-deployments \
+              "deployments/deployments.json" \
+              ${ucs04-chain-id} \
+              --rpc-url ${rpc-url} \
+              --lightclient cometbls --lightclient state-lens/ics23/ics23 --lightclient state-lens/ics23/mpt \
+              --ucs03 --ucs00 "$@"
           '';
         };
 
@@ -635,7 +600,7 @@ _: {
         {
           name,
 
-          chain-id,
+          ucs04-chain-id,
           rpc-url,
           private-key,
 
@@ -651,7 +616,7 @@ _: {
               do
                 cast \
                   send \
-                  ${(getDeployment chain-id).manager} \
+                  ${(getDeployment ucs04-chain-id).manager} \
                   "function grantRole(uint64,address,uint32)" \
                   1 "$relayer" 0 \
                   --private-key ${private-key} \
@@ -1135,22 +1100,22 @@ _: {
               name = "update-deployments-json";
               text =
                 let
-                  deployments = builtins.filter (deployment: deployment.ibc_interface == "ibc-solidity") (
+                  deployments = pkgs.lib.filterAttrs (_: deployment: deployment.ibc_interface == "ibc-solidity") (
                     builtins.fromJSON (builtins.readFile ../deployments/deployments.json)
                   );
                   getNetwork =
-                    chainId:
-                    pkgs.lib.lists.findSingle (network: network.chain-id == chainId)
-                      (throw "no network found with chain id ${chainId}")
-                      (throw "many networks with chain id ${chainId} found")
+                    ucs04chainId:
+                    pkgs.lib.lists.findSingle (network: network.ucs04-chain-id or null == ucs04chainId)
+                      (throw "no network found with ucs04 chain id ${ucs04chainId}")
+                      (throw "many networks with ucs04 chain id ${ucs04chainId} found")
                       networks;
                 in
-                pkgs.lib.concatMapStringsSep "\n\n" (deployment: ''
-                  echo "updating ${deployment.universal_chain_id}"
+                pkgs.lib.concatMapStringsSep "\n\n" (ucs04ChainId: ''
+                  echo "updating ${ucs04ChainId}"
                   ${pkgs.lib.getExe
-                    self'.packages.evm-scripts.${(getNetwork deployment.chain_id).name}.update-deployments-json
+                    self'.packages.evm-scripts.${(getNetwork ucs04ChainId).name}.update-deployments-json
                   }
-                '') deployments;
+                '') (builtins.attrNames deployments);
             };
           }
           // (builtins.listToAttrs (
@@ -1181,6 +1146,7 @@ _: {
                     state-lens-ics23-smt-client = "StateLensIcs23SmtClient";
                     multicall = "Multicall";
                     erc20 = "ZkgmERC20";
+                    u = "U";
                   }
                 )
                 # other various deployment scripts

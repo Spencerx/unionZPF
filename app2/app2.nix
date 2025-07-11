@@ -25,8 +25,8 @@ _: {
       PUBLIC_GIT_REV = gitShortRev;
       PUBLIC_LAST_MODIFIED_DATE = lastModifiedDate;
       PUBLIC_LAST_MODIFIED_EPOCH = lastModified;
-      VITE_SUPABASE_URL = "https://api.dashboard.union.build";
-      VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcnF6cHVyeXJnZm5lY2FkYWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzQzNzM0NDAsImV4cCI6MjA0OTk0OTQ0MH0.4xkWpfMkYgBz4nqUGkZVjQNP7NxLa4filDoJRCI3yWo";
+      PUBLIC_SUPABASE_URL = "https://api.dashboard.union.build";
+      PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVvcnF6cHVyeXJnZm5lY2FkYWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzQzNzM0NDAsImV4cCI6MjA0OTk0OTQ0MH0.4xkWpfMkYgBz4nqUGkZVjQNP7NxLa4filDoJRCI3yWo";
     in
     {
       packages = {
@@ -37,7 +37,7 @@ _: {
             ../typescript-sdk
             ../ts-sdk
           ];
-          hash = "sha256-Rre5X8ATXG/dSr50+RJXZVwpMdSSNs+rxoe6oK0TdQg";
+          hash = "sha256-kjFwxPfawrFdnF4Jsd5UdRIsuIoDpg8HLSaz++6oB08=";
           buildInputs = deps;
           nativeBuildInputs = buildInputs;
           pnpmWorkspaces = [
@@ -52,8 +52,8 @@ _: {
             export PUBLIC_GIT_REV="${PUBLIC_GIT_REV}"
             export PUBLIC_LAST_MODIFIED_DATE="${PUBLIC_LAST_MODIFIED_DATE}"
             export PUBLIC_LAST_MODIFIED_EPOCH="${PUBLIC_LAST_MODIFIED_EPOCH}"
-            export VITE_SUPABASE_URL="${VITE_SUPABASE_URL}"
-            export VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY}"
+            export PUBLIC_SUPABASE_URL="${PUBLIC_SUPABASE_URL}"
+            export PUBLIC_SUPABASE_ANON_KEY="${PUBLIC_SUPABASE_ANON_KEY}"
             pnpm --filter=app2 prepare
             pnpm --filter=app2 build
             runHook postBuild
@@ -83,10 +83,10 @@ _: {
               export PUBLIC_GIT_REV="${PUBLIC_GIT_REV}"
               export PUBLIC_LAST_MODIFIED_DATE="${PUBLIC_LAST_MODIFIED_DATE}"
               export PUBLIC_LAST_MODIFIED_EPOCH="${PUBLIC_LAST_MODIFIED_EPOCH}"
-              export VITE_SUPABASE_URL="${VITE_SUPABASE_URL}"
-              export VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY}"
+              export PUBLIC_SUPABASE_URL="${PUBLIC_SUPABASE_URL}"
+              export PUBLIC_SUPABASE_ANON_KEY="${PUBLIC_SUPABASE_ANON_KEY}"
               pnpm install
-              pnpm run dev -- --host
+              pnpm run dev --host
             '';
           };
         };
@@ -95,6 +95,7 @@ _: {
           program = pkgs.writeShellApplication {
             name = "app-check-watch";
             runtimeInputs = deps;
+            # TODO: decrease threshold to "warning"
             text = ''
               ${ensureAtRepositoryRoot}
               cd app2/
@@ -102,7 +103,9 @@ _: {
               export PUBLIC_GIT_REV="${PUBLIC_GIT_REV}"
               export PUBLIC_LAST_MODIFIED_DATE="${PUBLIC_LAST_MODIFIED_DATE}"
               export PUBLIC_LAST_MODIFIED_EPOCH="${PUBLIC_LAST_MODIFIED_EPOCH}"
-              pnpm run check --watch --threshold warning
+              export PUBLIC_SUPABASE_URL="${PUBLIC_SUPABASE_URL}"
+              export PUBLIC_SUPABASE_ANON_KEY="${PUBLIC_SUPABASE_ANON_KEY}"
+              pnpm run check --watch --threshold error
             '';
           };
         };
@@ -114,7 +117,7 @@ _: {
             text = ''
               ${ensureAtRepositoryRoot}
               cd app2/
-              pnpm dlx gql.tada generate-schema --tsconfig ./tsconfig.json --output "./src/generated/schema.graphql" "https://graphql.union.build/v1/graphql"
+              pnpm dlx gql.tada generate-schema --tsconfig ./tsconfig.json --output "./src/generated/schema.graphql" "https://orion.james.union.build/v1/graphql"
               pnpm dlx gql.tada generate-output --disable-preprocessing --tsconfig ./tsconfig.json --output ./src/generated/graphql-env.d.ts
             '';
           };

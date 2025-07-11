@@ -1,6 +1,6 @@
 import { extractErrorDetails } from "@unionlabs/sdk/utils"
 import { Effect, Option, pipe } from "effect"
-import { getSupabaseClient } from "../client"
+import { SupabaseClient } from "../client"
 import type { Entity } from "../client"
 import { CACHE_VERSION, STALE, TTL } from "../config"
 import {
@@ -28,7 +28,7 @@ export const getUserAchievements = (userId: string) =>
     TTL,
     STALE,
     pipe(
-      getSupabaseClient(),
+      SupabaseClient,
       Effect.flatMap((client) =>
         Effect.tryPromise({
           try: () => client.from("user_achievements").select("*").eq("user_id", userId),
@@ -55,7 +55,7 @@ export const getUserExperience = (userId: string) =>
     TTL,
     STALE,
     pipe(
-      getSupabaseClient(),
+      SupabaseClient,
       Effect.flatMap((client) =>
         Effect.tryPromise({
           try: () => client.from("leaderboard").select("*").eq("user_id", userId).single(),
@@ -97,7 +97,7 @@ export const getUserMissions = (userId: string) =>
     TTL,
     STALE,
     pipe(
-      getSupabaseClient(),
+      SupabaseClient,
       Effect.flatMap((client) =>
         Effect.tryPromise({
           try: () => client.from("user_missions").select("*").eq("user_id", userId),
@@ -124,7 +124,7 @@ export const getUserRewards = (userId: string) =>
     TTL,
     STALE,
     pipe(
-      getSupabaseClient(),
+      SupabaseClient,
       Effect.flatMap((client) =>
         Effect.tryPromise({
           try: () =>
@@ -155,7 +155,7 @@ export const getWalletsByUserId = (userId: string) =>
     TTL,
     STALE,
     pipe(
-      getSupabaseClient(),
+      SupabaseClient,
       Effect.flatMap((client) =>
         Effect.tryPromise({
           try: () =>
@@ -180,7 +180,7 @@ export const getWalletsByUserId = (userId: string) =>
 
 export const removeUserWallet = (userId: string, address: string) =>
   pipe(
-    getSupabaseClient(),
+    SupabaseClient,
     Effect.flatMap((client) =>
       Effect.tryPromise({
         try: () => client.from("wallets").delete().eq("user_id", userId).eq("address", address),
@@ -216,7 +216,7 @@ export const removeUserWallet = (userId: string, address: string) =>
 
 export const invokeTick = (userId: string) =>
   pipe(
-    getSupabaseClient(),
+    SupabaseClient,
     Effect.flatMap((client) =>
       Effect.tryPromise({
         try: () => client.functions.invoke("tick", { body: { user_id: userId } }),
@@ -230,6 +230,41 @@ export const invokeTick = (userId: string) =>
     Effect.retry(retryForever),
     Effect.catchAll((error) => {
       errorStore.showError(new SupabaseError({ operation: "invokeTick", cause: error }))
+      return Effect.void
+    }),
+  )
+
+export const requestRole = (userId: string, rewardId: string) =>
+  pipe(
+    SupabaseClient,
+    Effect.flatMap((client) =>
+      Effect.tryPromise({
+        try: () =>
+          client.functions.invoke("request-role", {
+            body: { user_id: userId, reward_id: rewardId },
+          }),
+        catch: (error) =>
+          new SupabaseError({
+            operation: "requestRole",
+            cause: extractErrorDetails(error as Error),
+          }),
+      })
+    ),
+    Effect.retry(retryForever),
+    Effect.flatMap(response => {
+      if (response.error) {
+        const errorDetails = extractErrorDetails(response.error)
+        return Effect.zipRight(
+          Effect.logError("Request role function returned an error in its response.", {
+            error: errorDetails,
+          }),
+          Effect.fail(new RewardError({ operation: "requestRole", cause: errorDetails })),
+        )
+      }
+      return Effect.succeed(response.data)
+    }),
+    Effect.catchAll((error) => {
+      errorStore.showError(new RewardError({ cause: error, operation: "requestRole" }))
       return Effect.succeed(void 0)
     }),
   )
@@ -247,7 +282,7 @@ export const submitWalletVerification = (
   input: SubmitWalletVerificationInput,
 ) =>
   pipe(
-    getSupabaseClient(),
+    SupabaseClient,
     Effect.flatMap((client) =>
       Effect.tryPromise({
         try: () =>

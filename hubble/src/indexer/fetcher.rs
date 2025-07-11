@@ -10,7 +10,10 @@ use super::{
 };
 use crate::indexer::{
     api::{BlockHandle, BlockRange, BlockSelection, FetchMode, IndexerError},
-    postgres::{get_current_height, update_block_status, update_current_height},
+    postgres::{
+        block_status::update_block_status,
+        indexer_status::{get_current_height, update_current_height},
+    },
     HappyRangeFetcher,
 };
 
@@ -26,6 +29,10 @@ enum RunToTipLoopResult {
 
 impl<T: FetcherClient> Indexer<T> {
     pub async fn run_fetcher(&self, fetcher_client: T) -> Result<(), IndexerError> {
+        if self.drain {
+            return Ok(());
+        }
+
         self.run_to_finalized(&fetcher_client)
             .instrument(info_span!("run-to-finalized"))
             .await?;
@@ -98,12 +105,15 @@ impl<T: FetcherClient> Indexer<T> {
     }
 
     async fn store_block(&self, block_handle: T::BlockHandle) -> Result<(), Report> {
-        let reference = block_handle.reference();
+        let reference = &block_handle.reference();
         debug!("store: {}", reference);
 
         let mut tx = self.pg_pool.begin().await?;
 
-        block_handle.insert(&mut tx).await?;
+        if let Some(events) = block_handle.insert(&mut tx).await? {
+            self.schedule_message(&mut tx, reference.into(), Some(events))
+                .await?;
+        }
 
         update_current_height(
             &mut tx,
@@ -163,10 +173,18 @@ impl<T: FetcherClient> Indexer<T> {
                 }
 
                 let mut tx = self.pg_pool.begin().await?;
-                block_handle
+                let events = block_handle
                     .insert(&mut tx)
                     .instrument(info_span!("insert"))
                     .await?;
+
+                let message_hash = match events {
+                    Some(events) => Some(
+                        self.schedule_message(&mut tx, reference.into(), Some(events))
+                            .await?,
+                    ),
+                    None => None,
+                };
 
                 debug!("{}: update height", reference);
                 update_current_height(
@@ -184,6 +202,7 @@ impl<T: FetcherClient> Indexer<T> {
                     reference.height,
                     reference.hash.clone(),
                     reference.timestamp,
+                    message_hash,
                 )
                 .await?;
 

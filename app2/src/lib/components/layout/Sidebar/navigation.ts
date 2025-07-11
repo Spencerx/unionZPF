@@ -1,4 +1,5 @@
 import DiscordIcon from "$lib/components/icons/DiscordIcon.svelte"
+import GithubIcon from "$lib/components/icons/GithubIcon.svelte"
 import OutlineControlPointDuplicate from "$lib/components/icons/OutlineControlPointDuplicate.svelte"
 import SharpChannelsIcon from "$lib/components/icons/SharpChannelsIcon.svelte"
 import SharpDashboardIcon from "$lib/components/icons/SharpDashboardIcon.svelte"
@@ -11,6 +12,7 @@ export interface NavSubItem {
   path: string
   title: string
   editions?: Array<string>
+  new?: boolean
 }
 
 export interface NavItem {
@@ -69,6 +71,11 @@ export const navigation: Array<NavSection> = [
           {
             path: "/explorer/find-packet",
             title: "Find Packet",
+          },
+          {
+            path: "/explorer/orbital",
+            title: "Orbital",
+            new: true,
           },
           // {
           //   path: "/explorer/connections",
@@ -129,6 +136,12 @@ export const navigation: Array<NavSection> = [
         path: "https://x.com/@union_build",
         title: "@union_build",
         icon: TwitterIcon,
+        external: true,
+      },
+      {
+        path: "https://github.com/unionlabs",
+        title: "@unionlabs",
+        icon: GithubIcon,
         external: true,
       },
     ],

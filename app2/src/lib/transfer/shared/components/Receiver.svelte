@@ -13,7 +13,6 @@ import { getDerivedReceiverSafe } from "$lib/services/shared"
 import { uiStore } from "$lib/stores/ui.svelte.ts"
 import { wallets } from "$lib/stores/wallets.svelte.ts"
 import { transferData } from "$lib/transfer/shared/data/transfer-data.svelte.ts"
-import { cn } from "$lib/utils"
 import { clickOutside } from "$lib/utils/actions.ts"
 import type { AddressCanonicalBytes } from "@unionlabs/sdk/schema"
 import { Array as A, Option } from "effect"
@@ -74,22 +73,23 @@ let hasWalletAddress = $derived(
   destinationChain && Option.isSome(wallets.getAddressForChain(destinationChain)),
 )
 
+let autoFilledValue = $state("")
+
 $effect(() => {
   if (destinationChain && destinationChainId) {
-    // First try to use connected wallet if available
-    if (hasWalletAddress) {
-      const address = wallets.getAddressForChain(destinationChain)
-      const addressValue = Option.getOrNull(address)
-      if (addressValue && !transferData.raw.receiver) {
-        transferData.raw.updateField("receiver", addressValue)
-        return
-      }
-    }
+    const walletAddress = wallets.getAddressForChain(destinationChain)
 
-    if (recentAddresses[destinationChainId]?.length > 0) {
-      const mostRecentAddress = recentAddresses[destinationChainId][0]
-      if (mostRecentAddress && !transferData.raw.receiver) {
-        transferData.raw.updateField("receiver", mostRecentAddress)
+    if (Option.isSome(walletAddress)) {
+      // wallet connected - auto-fill receiver if empty
+      if (!transferData.raw.receiver) {
+        transferData.raw.updateField("receiver", walletAddress.value)
+        autoFilledValue = walletAddress.value
+      }
+    } else {
+      // no wallet connected - only clear if receiver matches what we auto-filled
+      if (transferData.raw.receiver === autoFilledValue) {
+        transferData.raw.updateField("receiver", "")
+        autoFilledValue = ""
       }
     }
   }
@@ -331,9 +331,7 @@ function hasBookmarks() {
       class="w-full h-full max-h-full flex flex-col"
       transition:fly={{ y: 30, duration: 300, opacity: 0 }}
     >
-      <div
-        class="border-b border-zinc-800 flex justify-between items-center h-12 flex-shrink-0 p-4"
-      >
+      <div class="border-b border-zinc-800 flex justify-between items-center h-12 flex-shrink-0 p-4">
         <div class="flex items-center h-full">
           <button
             aria-label="Back"
@@ -543,9 +541,7 @@ function hasBookmarks() {
             && recentAddresses[destinationChainId]?.length > 0}
               <div class="space-y-2">
                 {#each recentAddresses[destinationChainId] as address}
-                  <div
-                    class="flex items-center justify-between px-4 py-3 bg-zinc-900 hover:bg-zinc-800 transition-colors cursor-pointer rounded"
-                  >
+                  <div class="flex items-center justify-between px-4 py-3 bg-zinc-900 hover:bg-zinc-800 transition-colors cursor-pointer rounded">
                     <button
                       onclick={() => useAddress(address)}
                       class="text-left flex-grow truncate text-zinc-200 hover:text-white text-sm cursor-pointer"
@@ -594,9 +590,7 @@ function hasBookmarks() {
             {#if destinationChainId && bookmarkedAddresses[destinationChainId]?.length > 0}
               <div class="space-y-2">
                 {#each bookmarkedAddresses[destinationChainId] as address}
-                  <div
-                    class="flex items-center justify-between px-4 py-3 bg-zinc-900 hover:bg-zinc-800 transition-colors rounded cursor-pointer"
-                  >
+                  <div class="flex items-center justify-between px-4 py-3 bg-zinc-900 hover:bg-zinc-800 transition-colors rounded cursor-pointer">
                     <button
                       onclick={() => useAddress(address)}
                       class="text-left flex-grow truncate text-zinc-200 hover:text-white cursor-pointer"

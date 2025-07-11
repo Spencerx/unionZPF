@@ -49,8 +49,8 @@ const getExplorerUrl = () => {
   // Replace {address} placeholder if it exists, otherwise append the address
   const addressUrl = explorer.address_url.toString()
   return addressUrl.includes("{address}")
-    ? addressUrl.replace("{address}", displayAddress)
-    : `${addressUrl}${displayAddress}`
+    ? addressUrl.replace("{address}", fullDisplayAddress)
+    : `${addressUrl}${fullDisplayAddress}`
 }
 
 const explorerUrl = $derived(getExplorerUrl())
@@ -77,7 +77,8 @@ const explorerName = $derived(chain.explorers.length > 0 ? chain.explorers[0].di
       </section>
 
       <section>
-        <Label>Chain</Label> <div>{chain.display_name}</div>
+        <Label>Chain</Label>
+        <div>{chain.display_name}</div>
       </section>
       <section>
         <Label>Display</Label>
