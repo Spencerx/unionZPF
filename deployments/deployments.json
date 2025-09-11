@@ -94,8 +94,8 @@
       "ucs03": {
         "address": "bbn1336jj8ertl8h7rdvnz4dh5rqahd09cy0x43guhsxx6xyrztx292q77945h",
         "height": 714737,
-        "commit": "397772b4bf7fb54e7b1e34da7dd6cade775f5424",
-        "code_id": 877,
+        "commit": "b14e18b675640de5546caf4e7594262e0728d45d",
+        "code_id": 1021,
         "minter": {
           "type": "cw20",
           "address": "bbn1sakazthycqgzer50nqgr5ta4vy3gwz8wxla3s8rd8pql4ctmz5qssg39sf",
@@ -103,6 +103,51 @@
           "code_id": 753
         }
       }
+    }
+  },
+  "base.8453": {
+    "ibc_interface": "ibc-solidity",
+    "deployer": "0x6dd4e0224d46b60d86e57c9e5980589e9818020f",
+    "sender": "0x95fb5cb304508d74d855514d7bc9bda75c304ce2",
+    "manager": "0x40cdff51ae7487e0b4a4d6e5f86eb15fb7c1d9f4",
+    "multicall": {
+      "address": "0x70276995f225df69936eaec02ddece998a9e3662",
+      "height": 35397312,
+      "commit": "unknown"
+    },
+    "core": {
+      "address": "0xee4ea8d358473f0fcebf0329feed95d56e8c04d7",
+      "height": 35397312,
+      "commit": "446cad9253e6d574ac64712d8f1a33b0cdf5e74a"
+    },
+    "lightclient": {
+      "cometbls": {
+        "address": "0x7700ea295f62989d2c98721389a521c96fe3c4c0",
+        "height": 35397312,
+        "commit": "446cad9253e6d574ac64712d8f1a33b0cdf5e74a"
+      },
+      "state-lens/ics23/ics23": {
+        "address": "0x2c5b55a11fad1d169b83df21d886ce0797f3a83d",
+        "height": 35397312,
+        "commit": "446cad9253e6d574ac64712d8f1a33b0cdf5e74a"
+      },
+      "state-lens/ics23/mpt": {
+        "address": "0x473b540b38f02db8109d5bf4f80f0e03e4e31805",
+        "height": 35397312,
+        "commit": "446cad9253e6d574ac64712d8f1a33b0cdf5e74a"
+      }
+    },
+    "app": {
+      "ucs03": {
+        "address": "0x5fbe74a283f7954f10aa04c2edf55578811aeb03",
+        "height": 35397312,
+        "commit": "446cad9253e6d574ac64712d8f1a33b0cdf5e74a"
+      }
+    },
+    "u": {
+      "address": "0xba5ed44733953d79717f6269357c77718c8ba5ed",
+      "height": 35397374,
+      "commit": "446cad9253e6d574ac64712d8f1a33b0cdf5e74a"
     }
   },
   "base.84532": {
@@ -658,6 +703,51 @@
       }
     }
   },
+  "sei.1329": {
+    "ibc_interface": "ibc-solidity",
+    "deployer": "0x6dd4e0224d46b60d86e57c9e5980589e9818020f",
+    "sender": "0x95fb5cb304508d74d855514d7bc9bda75c304ce2",
+    "manager": "0x40cdff51ae7487e0b4a4d6e5f86eb15fb7c1d9f4",
+    "multicall": {
+      "address": "0x70276995f225df69936eaec02ddece998a9e3662",
+      "height": 167472753,
+      "commit": "unknown"
+    },
+    "core": {
+      "address": "0xee4ea8d358473f0fcebf0329feed95d56e8c04d7",
+      "height": 167472746,
+      "commit": "d97bf8a9148482e104c87feb1606c842059c836e"
+    },
+    "lightclient": {
+      "cometbls": {
+        "address": "0x7700ea295f62989d2c98721389a521c96fe3c4c0",
+        "height": 167472748,
+        "commit": "d97bf8a9148482e104c87feb1606c842059c836e"
+      },
+      "state-lens/ics23/ics23": {
+        "address": "0x2c5b55a11fad1d169b83df21d886ce0797f3a83d",
+        "height": 167472749,
+        "commit": "d97bf8a9148482e104c87feb1606c842059c836e"
+      },
+      "state-lens/ics23/mpt": {
+        "address": "0x473b540b38f02db8109d5bf4f80f0e03e4e31805",
+        "height": 167472749,
+        "commit": "d97bf8a9148482e104c87feb1606c842059c836e"
+      }
+    },
+    "app": {
+      "ucs03": {
+        "address": "0x5fbe74a283f7954f10aa04c2edf55578811aeb03",
+        "height": 167472753,
+        "commit": "d97bf8a9148482e104c87feb1606c842059c836e"
+      }
+    },
+    "u": {
+      "address": "0xba5ed44733953d79717f6269357c77718c8ba5ed",
+      "height": 167472800,
+      "commit": "d97bf8a9148482e104c87feb1606c842059c836e"
+    }
+  },
   "union.union-1": {
     "ibc_interface": "ibc-cosmwasm",
     "deployer": "union10c4yqddv6w7sphruvhxs5v0es8r9fcj5mpru7a",
@@ -673,6 +763,12 @@
         "height": 461749,
         "commit": "a0184eba9783c05ef86275386d2ea95d7630d22f",
         "code_id": 20
+      },
+      "base": {
+        "address": "union1xll86ajefrwsjn0msw89xhnmyd85fyzc6203j8p5uc6t7kyuvusqkutpsu",
+        "height": 2869093,
+        "commit": "a685dd3ef28affaef37071e75c1db385a469de97",
+        "code_id": 56
       },
       "berachain": {
         "address": "union12dx3w0pxkpyguf4xrx79zkhk0lvzewyqtjjngqmhuajjgu5qm6uq2rvlr7",
