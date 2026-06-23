@@ -553,6 +553,7 @@ static_assertions  = { git = "https://github.com/nvzqz/static-assertions" }     
 strum              = { version = "0.27", default-features = false }
 subtle-encoding    = { version = "0.5.1", default-features = false }
 syn                = { version = "2", default-features = false }
+syn-solidity       = { version = "1", default-features = false }
 thiserror          = { version = "2.0.12", default-features = false }
 time               = { version = "0.3.41", default-features = false }
 tokio              = { version = "1.45.1", default-features = false }
@@ -563,6 +564,7 @@ tower              = { version = "0.5", default-features = false }
 tower-http         = { version = "0.6.4", default-features = false }
 tracing            = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi"] }
+typed-arena        = { version = "2", default-features = false }
 typenum            = { version = "1.18.0", default-features = false }
 
 # tracing-opentelemetry    = { version = "0.30.0", default-features = false }

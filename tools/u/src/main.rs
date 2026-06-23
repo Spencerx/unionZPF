@@ -24,6 +24,7 @@ pub mod gno;
 pub mod packet;
 pub mod parlia;
 pub mod path;
+pub mod slot;
 pub mod vanity;
 pub mod zkgm;
 
@@ -80,6 +81,8 @@ pub enum Cmd {
     Path(path::Cmd),
     #[command(subcommand)]
     Packet(packet::Cmd),
+    #[command(visible_alias = "s")]
+    Slot(slot::Cmd),
     #[command(visible_alias = "v", subcommand)]
     Vanity(vanity::Cmd),
     #[command(visible_alias = "h")]
@@ -132,6 +135,7 @@ async fn main() -> Result<()> {
         Cmd::Deployments(cmd) => cmd.run(),
         Cmd::Path(cmd) => cmd.run(),
         Cmd::Packet(cmd) => cmd.run(),
+        Cmd::Slot(cmd) => cmd.run(),
         Cmd::Vanity(cmd) => cmd.run().await,
         Cmd::Hex {
             decode,
