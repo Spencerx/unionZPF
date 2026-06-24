@@ -36,8 +36,8 @@ jsonrpsee          = { workspace = true, features = ["client", "full", "tracing"
 keccak-asm         = "0.1.4"
 num_cpus           = "1.16"
 parlia-verifier    = { workspace = true }
-proc-macro2        = { workspace = true }
 protos             = { workspace = true, features = ["proto_full", "serde"] }
+syn                = { workspace = true, features = ["parsing"] }
 rand               = { workspace = true }
 serde              = { workspace = true, features = ["derive"] }
 serde_json         = { workspace = true }

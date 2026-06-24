@@ -3,25 +3,13 @@ use std::collections::VecDeque;
 
 use anyhow::{Context, bail};
 use solidity_slot::{H256, MappingKey, Slot, U256};
-use syn_solidity::{Item, Type};
+use syn_solidity::Type;
 use typed_arena::Arena;
 
 fn parse_layout(layout: &str) -> anyhow::Result<Type> {
-    // syn-solidity parses items, not bare types. Wrapping in a dummy state variable lets it parse any layout string the user provides.
-    let src = format!("{layout} public dummy;");
-
-    let tokens = src
-        .parse::<proc_macro2::TokenStream>()
-        .ok()
-        .context("failed to tokenize layout")?;
-    let file = syn_solidity::parse2(tokens).context("failed to parse layout as Solidity")?;
-
-    match file.items.into_iter().next() {
-        Some(Item::Variable(var)) => match var.ty {
-            ty @ (Type::Mapping(_) | Type::Array(_)) => Ok(ty),
-            other => bail!("unsupported top-level layout type: {other:?}"),
-        },
-        _ => bail!("layout did not parse to a state variable declaration"),
+    match syn::parse_str::<Type>(layout).context("failed to parse layout as Solidity type")? {
+        ty @ (Type::Mapping(_) | Type::Array(_)) => Ok(ty),
+        other => bail!("unsupported top-level layout type: {other:?}"),
     }
 }
 
