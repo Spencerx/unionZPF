@@ -38,12 +38,16 @@ keccak-asm         = "0.1.4"
 num_cpus           = "1.16"
 parlia-verifier    = { workspace = true }
 protos             = { workspace = true, features = ["proto_full", "serde"] }
+syn                = { workspace = true, features = ["parsing"] }
 rand               = { workspace = true }
 serde              = { workspace = true, features = ["derive"] }
 serde_json         = { workspace = true }
 sha2               = { workspace = true, features = ["asm", "asm-aarch64"] }
+solidity-slot      = { workspace = true }
 subtle-encoding    = { workspace = true, features = ["bech32-preview"] }
+syn-solidity       = { workspace = true }
 tokio              = { workspace = true, features = ["macros"] }
+typed-arena        = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 ucs03-zkgm         = { workspace = true }
@@ -67,3 +71,6 @@ state-lens-ics23-mpt-light-client-types   = { workspace = true, features = ["ser
 state-lens-ics23-smt-light-client-types   = { workspace = true, features = ["serde", "bincode", "ethabi"] }
 tendermint-light-client-types             = { workspace = true, features = ["serde", "bincode", "ethabi"] }
 trusted-mpt-light-client-types            = { workspace = true, features = ["serde", "bincode", "ethabi"] }
+
+[dev-dependencies]
+hex-literal        = { workspace = true }
